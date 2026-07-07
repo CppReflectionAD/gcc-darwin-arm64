@@ -29,6 +29,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "intl.h"
 #include "attribs.h"
 #include "c-family/c-pragma.h" // for parse_in
+#include "c-family/c-common.h"
 #include "gimplify.h" // for unshare_expr
 #include "tree-iterator.h"
 #include "metafns.h"
@@ -3304,8 +3305,18 @@ eval_statements_of (location_t loc, const constexpr_ctx *ctx, tree r,
     return throw_exception (loc, ctx, "reflection does not represent a block or statement",
 			    fun, non_constant_p, jump_target);
 
-  if (TREE_CODE (r) == BIND_EXPR)
-    r = BIND_EXPR_BODY (r);
+  // Automatically unwrap common statement wrappers recursively
+  while (r && (TREE_CODE (r) == BIND_EXPR
+	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
+	       || TREE_CODE (r) == EXPR_STMT))
+    {
+      if (TREE_CODE (r) == BIND_EXPR)
+	r = BIND_EXPR_BODY (r);
+      else if (TREE_CODE (r) == CLEANUP_POINT_EXPR)
+	r = TREE_OPERAND (r, 0);
+      else if (TREE_CODE (r) == EXPR_STMT)
+	r = EXPR_STMT_EXPR (r);
+    }
 
   vec<constructor_elt, va_gc> *elts = nullptr;
 
@@ -3316,9 +3327,128 @@ eval_statements_of (location_t loc, const constexpr_ctx *ctx, tree r,
 	  for (tree stmt : tsi_range (r))
 	    {
 	      if (stmt)
-		CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
-					get_reflection_raw (loc, stmt, REFLECT_UNDEF));
+		{
+		  while (stmt && (TREE_CODE (stmt) == BIND_EXPR
+				  || TREE_CODE (stmt) == CLEANUP_POINT_EXPR
+				  || TREE_CODE (stmt) == EXPR_STMT))
+		    {
+		      if (TREE_CODE (stmt) == BIND_EXPR)
+			stmt = BIND_EXPR_BODY (stmt);
+		      else if (TREE_CODE (stmt) == CLEANUP_POINT_EXPR)
+			stmt = TREE_OPERAND (stmt, 0);
+		      else if (TREE_CODE (stmt) == EXPR_STMT)
+			stmt = EXPR_STMT_EXPR (stmt);
+		    }
+		  if (stmt)
+		    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+					    get_reflection_raw (loc, stmt, REFLECT_UNDEF));
+		}
 	    }
+	}
+      else if (TREE_CODE (r) == IF_STMT)
+	{
+	  if (IF_COND (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, IF_COND (r), REFLECT_UNDEF));
+	  if (THEN_CLAUSE (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, THEN_CLAUSE (r), REFLECT_UNDEF));
+	  if (ELSE_CLAUSE (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, ELSE_CLAUSE (r), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == FOR_STMT)
+	{
+	  if (FOR_INIT_STMT (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, FOR_INIT_STMT (r), REFLECT_UNDEF));
+	  if (FOR_COND (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, FOR_COND (r), REFLECT_UNDEF));
+	  if (FOR_EXPR (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, FOR_EXPR (r), REFLECT_UNDEF));
+	  if (FOR_BODY (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, FOR_BODY (r), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == RANGE_FOR_STMT)
+	{
+	  if (RANGE_FOR_INIT_STMT (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, RANGE_FOR_INIT_STMT (r), REFLECT_UNDEF));
+	  if (RANGE_FOR_DECL (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, RANGE_FOR_DECL (r), REFLECT_UNDEF));
+	  if (RANGE_FOR_EXPR (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, RANGE_FOR_EXPR (r), REFLECT_UNDEF));
+	  if (RANGE_FOR_BODY (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, RANGE_FOR_BODY (r), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == WHILE_STMT)
+	{
+	  if (WHILE_COND (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, WHILE_COND (r), REFLECT_UNDEF));
+	  if (WHILE_BODY (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, WHILE_BODY (r), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == DO_STMT)
+	{
+	  if (DO_BODY (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, DO_BODY (r), REFLECT_UNDEF));
+	  if (DO_COND (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, DO_COND (r), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == COND_EXPR)
+	{
+	  if (TREE_OPERAND (r, 0))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, TREE_OPERAND (r, 0), REFLECT_UNDEF));
+	  if (TREE_OPERAND (r, 1))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, TREE_OPERAND (r, 1), REFLECT_UNDEF));
+	  if (TREE_OPERAND (r, 2))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, TREE_OPERAND (r, 2), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == LOOP_EXPR)
+	{
+	  if (LOOP_EXPR_BODY (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, LOOP_EXPR_BODY (r), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == SWITCH_STMT)
+	{
+	  if (SWITCH_STMT_COND (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, SWITCH_STMT_COND (r), REFLECT_UNDEF));
+	  if (SWITCH_STMT_BODY (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, SWITCH_STMT_BODY (r), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == TRY_BLOCK)
+	{
+	  if (TRY_STMTS (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, TRY_STMTS (r), REFLECT_UNDEF));
+	  if (TRY_HANDLERS (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, TRY_HANDLERS (r), REFLECT_UNDEF));
+	}
+      else if (TREE_CODE (r) == HANDLER)
+	{
+	  if (HANDLER_PARMS (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, HANDLER_PARMS (r), REFLECT_UNDEF));
+	  if (HANDLER_BODY (r))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, HANDLER_BODY (r), REFLECT_UNDEF));
 	}
       else
 	{
@@ -3907,7 +4037,7 @@ eval_display_string_of (location_t loc, const constexpr_ctx *ctx, tree r,
     pp_printf (&pp, "[[=%E]]",
 	       tree_strip_any_location_wrapper (TREE_VALUE (TREE_VALUE (r))));
   else
-    pp_string (&pp, "<unsupported reflection>");
+    pp_printf (&pp, "<%s>", get_tree_code_name (TREE_CODE (r)));
 #if __GNUC__ >= 10
 #pragma GCC diagnostic pop
 #endif
