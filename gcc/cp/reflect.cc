@@ -30,6 +30,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "attribs.h"
 #include "c-family/c-pragma.h" // for parse_in
 #include "gimplify.h" // for unshare_expr
+#include "tree-iterator.h"
 #include "metafns.h"
 
 static tree eval_is_function_type (tree);
@@ -3264,6 +3265,69 @@ eval_return_type_of (location_t loc, const constexpr_ctx *ctx, tree r,
     r = TREE_TYPE (r);
   r = TREE_TYPE (r);
   return get_reflection_raw (loc, r, REFLECT_UNDEF);
+}
+
+/* Process std::meta::body_of.
+   Returns: The reflection of the body of the function represented by r.
+   Throws: meta::exception unless r represents a function and is defined.  */
+
+static tree
+eval_body_of (location_t loc, const constexpr_ctx *ctx, tree r,
+	      bool *non_constant_p, tree *jump_target, tree fun)
+{
+  if (eval_is_function (r) != boolean_true_node)
+    return throw_exception (loc, ctx, "reflection does not represent a function",
+			    fun, non_constant_p, jump_target);
+
+  r = maybe_get_first_fn (r);
+  tree body = DECL_SAVED_TREE (r);
+  if (!body)
+    return throw_exception (loc, ctx, "function is not defined",
+			    fun, non_constant_p, jump_target);
+
+  return get_reflection_raw (loc, body, REFLECT_UNDEF);
+}
+
+/* Process std::meta::statements_of.
+   Returns: A vector of reflections of top-level statements in the block.
+   Throws: meta::exception if the argument does not represent a block or statement.  */
+
+static tree
+eval_statements_of (location_t loc, const constexpr_ctx *ctx, tree r,
+		    bool *non_constant_p, tree *jump_target, tree fun)
+{
+  if (TYPE_P (r)
+      || TREE_CODE (r) == NAMESPACE_DECL
+      || TREE_CODE (r) == TEMPLATE_DECL
+      || TREE_CODE (r) == FUNCTION_DECL
+      || TREE_CODE (r) == FIELD_DECL)
+    return throw_exception (loc, ctx, "reflection does not represent a block or statement",
+			    fun, non_constant_p, jump_target);
+
+  if (TREE_CODE (r) == BIND_EXPR)
+    r = BIND_EXPR_BODY (r);
+
+  vec<constructor_elt, va_gc> *elts = nullptr;
+
+  if (r)
+    {
+      if (TREE_CODE (r) == STATEMENT_LIST)
+	{
+	  for (tree stmt : tsi_range (r))
+	    {
+	      if (stmt)
+		CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+					get_reflection_raw (loc, stmt, REFLECT_UNDEF));
+	    }
+	}
+      else
+	{
+	  CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				  get_reflection_raw (loc, r, REFLECT_UNDEF));
+	}
+    }
+
+  return get_vector_of_info_elts (elts);
 }
 
 /* Process std::meta::offset_of.
@@ -8355,6 +8419,10 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
     case METAFN_RETURN_TYPE_OF:
       return eval_return_type_of (loc, ctx, h, kind, non_constant_p,
 				  jump_target, fun);
+    case METAFN_BODY_OF:
+      return eval_body_of (loc, ctx, h, non_constant_p, jump_target, fun);
+    case METAFN_STATEMENTS_OF:
+      return eval_statements_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_IS_ACCESSIBLE:
       return eval_is_accessible (loc, ctx, h, kind, expr, call,
 				 non_constant_p, jump_target, fun);
