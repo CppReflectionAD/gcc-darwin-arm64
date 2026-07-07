@@ -1974,8 +1974,7 @@ iterative_hash_template_arg (tree arg, hashval_t val)
 	  val = iterative_hash_template_arg (direct_base_derived (binfo), val);
 	  return val;
 	}
-      /* Now hash operands as usual.  */
-      break;
+      return iterative_hash_template_arg (REFLECT_EXPR_HANDLE (arg), val);
 
     default:
       break;
@@ -2035,6 +2034,25 @@ iterative_hash_template_arg (tree arg, hashval_t val)
       return iterative_hash_expr (arg, val);
 
     default:
+      if (TREE_CODE (arg) == STATEMENT_LIST)
+	{
+	  for (tree stmt : tsi_range (arg))
+	    if (stmt)
+	      val = iterative_hash_template_arg (stmt, val);
+	  return val;
+	}
+      if (TREE_CODE (arg) == BIND_EXPR)
+	return iterative_hash_template_arg (BIND_EXPR_BODY (arg), val);
+
+      if (!IS_EXPR_CODE_CLASS (tclass))
+	{
+	  val = iterative_hash_hashval_t (TREE_CODE (arg), val);
+	  int len = cp_tree_operand_length (arg);
+	  for (int i = 0; i < len; ++i)
+	    if (TREE_OPERAND (arg, i))
+	      val = iterative_hash_template_arg (TREE_OPERAND (arg, i), val);
+	  return val;
+	}
       gcc_assert (IS_EXPR_CODE_CLASS (tclass));
       for (int i = 0, n = cp_tree_operand_length (arg); i < n; ++i)
 	val = iterative_hash_template_arg (TREE_OPERAND (arg, i), val);

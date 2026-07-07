@@ -143,6 +143,17 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 	static consteval string_view _S_exception_cvt_from_utf8(_Rg&&);
     };
 
+    // [meta.reflection.expression.kind], expression kind representation
+    enum class expression_kind {
+      literal,
+      variable,
+      function_call,
+      unary_op,
+      binary_op,
+      ternary_op,
+      other
+    };
+
     // [meta.reflection.operators], operator representations
     enum class operators {
       op_new = 1,
@@ -312,6 +323,11 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     consteval info return_type_of(info);
     consteval info body_of(info);
     consteval vector<info> statements_of(info);
+
+    consteval bool is_statement(info);
+    consteval bool is_expression(info);
+    consteval expression_kind expression_kind_of(info);
+    consteval vector<info> operands_of(info);
 
     // [meta.reflection.access.context], access control context
     struct access_context {
