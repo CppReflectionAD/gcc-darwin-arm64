@@ -2506,18 +2506,36 @@ eval_operator_of (location_t loc, const constexpr_ctx *ctx, tree r,
 		  bool *non_constant_p, tree *jump_target, tree ret_type,
 		  tree fun)
 {
-  if (eval_is_operator_function (r) == boolean_false_node
-      && eval_is_operator_function_template (r) == boolean_false_node)
-    return throw_exception (loc, ctx,
-			    "reflection does not represent an operator "
-			    "function or operator function template",
-			    fun, non_constant_p, jump_target);
-  r = maybe_get_first_fn (r);
-  r = STRIP_TEMPLATE (r);
   maybe_init_meta_operators (loc);
-  int i = IDENTIFIER_ASSIGN_OP_P (DECL_NAME (r)) ? 1 : 0;
-  int j = IDENTIFIER_CP_INDEX (DECL_NAME (r));
-  return build_int_cst (ret_type, meta_operators[i][j]);
+
+  if (eval_is_operator_function (r) == boolean_true_node
+      || eval_is_operator_function_template (r) == boolean_true_node)
+    {
+      r = maybe_get_first_fn (r);
+      r = STRIP_TEMPLATE (r);
+      int i = IDENTIFIER_ASSIGN_OP_P (DECL_NAME (r)) ? 1 : 0;
+      int j = IDENTIFIER_CP_INDEX (DECL_NAME (r));
+      return build_int_cst (ret_type, meta_operators[i][j]);
+    }
+
+  tree_code code = TREE_CODE (r);
+  if (code == MODIFY_EXPR || code == INIT_EXPR)
+    return build_int_cst (ret_type, meta_operators[1][OVL_OP_NOP_EXPR]);
+
+  if (code < MAX_TREE_CODES)
+    {
+      int j = ovl_op_mapping[code];
+      if (j != OVL_OP_ERROR_MARK)
+	{
+	  bool is_ass = (code == MODIFY_EXPR);
+	  return build_int_cst (ret_type, meta_operators[is_ass ? 1 : 0][j]);
+	}
+    }
+
+  return throw_exception (loc, ctx,
+			  "reflection does not represent an operator function, "
+			  "operator function template, or operator expression",
+			  fun, non_constant_p, jump_target);
 }
 
 /* Helper to build a string literal containing '\0' terminated NAME.
@@ -3450,11 +3468,145 @@ eval_statements_of (location_t loc, const constexpr_ctx *ctx, tree r,
 	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
 				    get_reflection_raw (loc, HANDLER_BODY (r), REFLECT_UNDEF));
 	}
+      else if (TREE_CODE (r) == RETURN_EXPR)
+	{
+	  if (TREE_OPERAND (r, 0))
+	    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				    get_reflection_raw (loc, TREE_OPERAND (r, 0), REFLECT_UNDEF));
+	}
       else
 	{
 	  CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
 				  get_reflection_raw (loc, r, REFLECT_UNDEF));
 	}
+    }
+
+  return get_vector_of_info_elts (elts);
+}
+
+static tree
+eval_is_statement (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  tree_code code = TREE_CODE (r);
+  switch (code)
+    {
+    case STATEMENT_LIST:
+    case BIND_EXPR:
+    case EXPR_STMT:
+    case CLEANUP_POINT_EXPR:
+    case IF_STMT:
+    case FOR_STMT:
+    case RANGE_FOR_STMT:
+    case WHILE_STMT:
+    case DO_STMT:
+    case SWITCH_STMT:
+    case TRY_BLOCK:
+    case HANDLER:
+    case RETURN_EXPR:
+    case LOOP_EXPR:
+    case COND_EXPR:
+    case BREAK_STMT:
+    case CONTINUE_STMT:
+    case DECL_EXPR:
+    case LABEL_EXPR:
+    case CASE_LABEL_EXPR:
+      return boolean_true_node;
+    default:
+      return boolean_false_node;
+    }
+}
+
+static tree
+eval_is_expression (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  tree_code code = TREE_CODE (r);
+  if (EXPR_P (r)
+      || CONSTANT_CLASS_P (r)
+      || code == VAR_DECL
+      || code == PARM_DECL
+      || code == CONST_DECL
+      || code == RESULT_DECL)
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+static tree
+eval_expression_kind_of (location_t loc, const constexpr_ctx *ctx, tree r,
+			 bool *non_constant_p, tree *jump_target, tree ret_type,
+			 tree fun)
+{
+  if (eval_is_expression (r) == boolean_false_node)
+    return throw_exception (loc, ctx, "reflection does not represent an expression",
+			    fun, non_constant_p, jump_target);
+
+  int val = 6; // other
+  tree_code code = TREE_CODE (r);
+  if (CONSTANT_CLASS_P (r))
+    val = 0; // literal
+  else if (code == VAR_DECL || code == PARM_DECL || code == CONST_DECL || code == RESULT_DECL)
+    val = 1; // variable
+  else if (code == CALL_EXPR)
+    val = 2; // function_call
+  else if (code == MODIFY_EXPR || code == INIT_EXPR)
+    val = 4; // binary_op
+  else if (code < MAX_TREE_CODES)
+    {
+      if (TREE_CODE_CLASS (code) == tcc_unary)
+	val = 3; // unary_op
+      else if (TREE_CODE_CLASS (code) == tcc_binary || TREE_CODE_CLASS (code) == tcc_comparison)
+	val = 4; // binary_op
+      else if (code == COND_EXPR)
+	val = 5; // ternary_op
+    }
+
+  return build_int_cst (ret_type, val);
+}
+
+static tree
+eval_operands_of (location_t loc, const constexpr_ctx *ctx, tree r,
+		  bool *non_constant_p, tree *jump_target, tree fun)
+{
+  if (eval_is_expression (r) == boolean_false_node)
+    return throw_exception (loc, ctx, "reflection does not represent an expression",
+			    fun, non_constant_p, jump_target);
+
+  vec<constructor_elt, va_gc> *elts = nullptr;
+
+  tree_code code = TREE_CODE (r);
+  if (CONSTANT_CLASS_P (r) || code == VAR_DECL || code == PARM_DECL || code == CONST_DECL || code == RESULT_DECL)
+    {
+      CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+			      get_reflection_raw (loc, r, REFLECT_UNDEF));
+    }
+  else if (code == CALL_EXPR)
+    {
+      // Append callee
+      if (CALL_EXPR_FN (r))
+	{
+	  tree fn = CALL_EXPR_FN (r);
+	  if (TREE_CODE (fn) == ADDR_EXPR)
+	    fn = TREE_OPERAND (fn, 0);
+	  CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				  get_reflection_raw (loc, fn, REFLECT_UNDEF));
+	}
+      // Append arguments
+      call_expr_arg_iterator ai;
+      for (tree arg = first_call_expr_arg (r, &ai); arg; arg = next_call_expr_arg (&ai))
+	if (arg)
+	  CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				  get_reflection_raw (loc, arg, REFLECT_UNDEF));
+    }
+  else
+    {
+      int len = cp_tree_operand_length (r);
+      for (int i = 0; i < len; ++i)
+	if (TREE_OPERAND (r, i))
+	  CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+				  get_reflection_raw (loc, TREE_OPERAND (r, i), REFLECT_UNDEF));
     }
 
   return get_vector_of_info_elts (elts);
@@ -8210,6 +8362,11 @@ check_metafn_return_type (location_t loc, metafn_kind_ret kind, tree type,
       break;
     case METAFN_KIND_RET_TEMPLATE_PARM:
       break;
+    case METAFN_KIND_RET_EXPRESSION_KIND:
+      if (TREE_CODE (type) != ENUMERAL_TYPE
+	  || TYPE_CONTEXT (type) != std_meta_node)
+	expected_str = "std::meta::expression_kind";
+      break;
     }
   if (expected || expected_str)
     {
@@ -8554,6 +8711,15 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_body_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_STATEMENTS_OF:
       return eval_statements_of (loc, ctx, h, non_constant_p, jump_target, fun);
+    case METAFN_IS_STATEMENT:
+      return eval_is_statement (h);
+    case METAFN_IS_EXPRESSION:
+      return eval_is_expression (h);
+    case METAFN_EXPRESSION_KIND_OF:
+      return eval_expression_kind_of (loc, ctx, h, non_constant_p, jump_target,
+				      rettype, fun);
+    case METAFN_OPERANDS_OF:
+      return eval_operands_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_IS_ACCESSIBLE:
       return eval_is_accessible (loc, ctx, h, kind, expr, call,
 				 non_constant_p, jump_target, fun);
