@@ -4165,7 +4165,7 @@ eval_display_string_of (location_t loc, const constexpr_ctx *ctx, tree r,
 	  pp_printf (&pp, "<unnamed parameter %d of %D>", idx, fn);
 	}
     }
-  else if (kind == REFLECT_VALUE || kind == REFLECT_OBJECT)
+  else if (kind == REFLECT_VALUE || kind == REFLECT_OBJECT || CONSTANT_CLASS_P (r))
     pp_printf (&pp, "%E", r);
   else if (DECL_P (r) && (DECL_NAME (r) || TREE_CODE (r) == NAMESPACE_DECL))
     pp_printf (&pp, "%D", r);
