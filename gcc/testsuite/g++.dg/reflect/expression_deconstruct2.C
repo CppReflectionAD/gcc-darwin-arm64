@@ -67,8 +67,8 @@ consteval bool run_test() {
   if (res[7] != "<negate_expr>") return false;
   if (res[8] != "<non_lvalue_expr>") return false;
   if (res[9] != "x") return false;
-  if (res[10] != "<real_cst>") return false;
-  if (res[11] != "<real_cst>") return false;
+  if (res[10] != "1.0e+0f") return false;
+  if (res[11] != "1.0e+0f") return false;
 
   return true;
 }
