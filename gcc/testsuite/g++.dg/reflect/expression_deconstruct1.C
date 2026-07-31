@@ -17,6 +17,9 @@ constexpr float sigmoid(float x) {
 
 consteval int count_leaves(info node) {
   if (is_expression(node)) {
+    if (is_variable(node) || is_literal(node)) {
+      return 1;
+    }
     auto operands = operands_of(node);
     if (operands.size() == 1 && operands[0] == node) {
       return 1;
@@ -51,7 +54,7 @@ consteval bool run_test() {
   // The returned assignment expression: res = (exp(-x) + 1.0f) + 1.0f
   info ret_expr = stmts[0];
   if (!is_expression(ret_expr)) return false;
-  if (expression_kind_of(ret_expr) != expression_kind::binary_op) return false;
+  if (!is_binary_operator(ret_expr)) return false;
   if (operator_of(ret_expr) != operators::op_equals) return false;
 
   auto operands = operands_of(ret_expr);
@@ -60,12 +63,12 @@ consteval bool run_test() {
   // Left operand: RESULT_DECL variable
   info lhs = operands[0];
   if (!is_expression(lhs)) return false;
-  if (expression_kind_of(lhs) != expression_kind::variable) return false;
+  if (!is_variable(lhs)) return false;
 
   // Right operand: (exp(-x) + 1.0f) + 1.0f
   info rhs = operands[1];
   if (!is_expression(rhs)) return false;
-  if (expression_kind_of(rhs) != expression_kind::binary_op) return false;
+  if (!is_binary_operator(rhs)) return false;
   if (operator_of(rhs) != operators::op_plus) return false;
 
   auto rhs_ops = operands_of(rhs);
@@ -73,21 +76,21 @@ consteval bool run_test() {
 
   // (exp(-x) + 1.0f)
   info inner_plus = rhs_ops[0];
-  if (expression_kind_of(inner_plus) != expression_kind::binary_op) return false;
+  if (!is_binary_operator(inner_plus)) return false;
   if (operator_of(inner_plus) != operators::op_plus) return false;
 
   // 1.0f literal
-  if (expression_kind_of(rhs_ops[1]) != expression_kind::literal) return false;
+  if (!is_literal(rhs_ops[1])) return false;
 
   auto inner_ops = operands_of(inner_plus);
   if (inner_ops.size() != 2) return false;
 
   // exp(-x) function call
   info call = inner_ops[0];
-  if (expression_kind_of(call) != expression_kind::function_call) return false;
+  if (!is_function_call(call)) return false;
 
   // 1.0f literal
-  if (expression_kind_of(inner_ops[1]) != expression_kind::literal) return false;
+  if (!is_literal(inner_ops[1])) return false;
 
   auto call_ops = operands_of(call);
   if (call_ops.size() != 2) return false;
@@ -99,7 +102,7 @@ consteval bool run_test() {
   // argument: the actual tree is NEGATE_EXPR(NOP_EXPR(x))
   // i.e. negate -> conversion -> variable
   info neg = call_ops[1];
-  if (expression_kind_of(neg) != expression_kind::unary_op) return false;
+  if (!is_unary_operator(neg)) return false;
   if (operator_of(neg) != operators::op_minus) return false;
 
   auto neg_ops = operands_of(neg);
@@ -107,13 +110,13 @@ consteval bool run_test() {
 
   // NOP_EXPR conversion (unary_op)
   info conv = neg_ops[0];
-  if (expression_kind_of(conv) != expression_kind::unary_op) return false;
+  if (!is_unary_operator(conv)) return false;
 
   auto conv_ops = operands_of(conv);
   if (conv_ops.size() != 1) return false;
 
   // x (PARM_DECL variable)
-  if (expression_kind_of(conv_ops[0]) != expression_kind::variable) return false;
+  if (!is_variable(conv_ops[0])) return false;
 
   // Count leaves of the sigmoid body.
   // Leaves: res_decl, exp (function), x (variable), 1.0f, 1.0f = 5

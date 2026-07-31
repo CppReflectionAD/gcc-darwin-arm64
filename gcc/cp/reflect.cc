@@ -1264,6 +1264,7 @@ eval_is_variable (const_tree r, reflect_kind kind)
 {
   /* ^^param is a variable but parameters_of(parent_of(^^param))[0] is not.  */
   if ((TREE_CODE (r) == PARM_DECL && kind != REFLECT_PARM)
+      || (TREE_CODE (r) == RESULT_DECL)
       || (VAR_P (r)
 	  && kind == REFLECT_UNDEF
 	  /* A structured binding is not a variable.  */
@@ -3576,38 +3577,6 @@ eval_is_function_call (tree r)
   if (TREE_CODE (r) == CALL_EXPR)
     return boolean_true_node;
   return boolean_false_node;
-}
-
-static tree
-eval_expression_kind_of (location_t loc, const constexpr_ctx *ctx, tree r,
-			 bool *non_constant_p, tree *jump_target, tree ret_type,
-			 tree fun)
-{
-  if (eval_is_expression (r) == boolean_false_node)
-    return throw_exception (loc, ctx, "reflection does not represent an expression",
-			    fun, non_constant_p, jump_target);
-
-  int val = 6; // other
-  tree_code code = TREE_CODE (r);
-  if (CONSTANT_CLASS_P (r))
-    val = 0; // literal
-  else if (code == VAR_DECL || code == PARM_DECL || code == CONST_DECL || code == RESULT_DECL)
-    val = 1; // variable
-  else if (code == CALL_EXPR)
-    val = 2; // function_call
-  else if (code == MODIFY_EXPR || code == INIT_EXPR)
-    val = 4; // binary_op
-  else if (code < MAX_TREE_CODES)
-    {
-      if (TREE_CODE_CLASS (code) == tcc_unary)
-	val = 3; // unary_op
-      else if (TREE_CODE_CLASS (code) == tcc_binary || TREE_CODE_CLASS (code) == tcc_comparison)
-	val = 4; // binary_op
-      else if (code == COND_EXPR)
-	val = 5; // ternary_op
-    }
-
-  return build_int_cst (ret_type, val);
 }
 
 static tree
@@ -8767,9 +8736,6 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_is_binary_operator (h);
     case METAFN_IS_FUNCTION_CALL:
       return eval_is_function_call (h);
-    case METAFN_EXPRESSION_KIND_OF:
-      return eval_expression_kind_of (loc, ctx, h, non_constant_p, jump_target,
-				      rettype, fun);
     case METAFN_OPERANDS_OF:
       return eval_operands_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_IS_ACCESSIBLE:
