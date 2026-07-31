@@ -1262,12 +1262,21 @@ maybe_init_meta_operators (location_t loc)
 static tree
 eval_is_variable (const_tree r, reflect_kind kind)
 {
-  if (!r)
-    return boolean_false_node;
-  tree_code code = TREE_CODE (r);
-  if (code == VAR_DECL || code == PARM_DECL || code == CONST_DECL || code == RESULT_DECL)
+  /* ^^param is a variable but parameters_of(parent_of(^^param))[0] is not.  */
+  if ((TREE_CODE (r) == PARM_DECL && kind != REFLECT_PARM)
+      || (VAR_P (r)
+	  && kind == REFLECT_UNDEF
+	  /* A structured binding is not a variable.  */
+	  && !(DECL_DECOMPOSITION_P (r) && !DECL_DECOMP_IS_BASE (r)))
+      || (VAR_P (r)
+	  /* Underlying variable of tuple using structured binding is a
+	     variable.  */
+	  && kind == REFLECT_VAR
+	  && DECL_DECOMPOSITION_P (r)
+	  && !DECL_DECOMP_IS_BASE (r)))
     return boolean_true_node;
-  return boolean_false_node;
+  else
+    return boolean_false_node;
 }
 
 /* Process std::meta::is_type.
