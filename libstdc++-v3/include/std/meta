@@ -326,6 +326,10 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
     consteval bool is_statement(info);
     consteval bool is_expression(info);
+    consteval bool is_literal(info);
+    consteval bool is_unary_operator(info);
+    consteval bool is_binary_operator(info);
+    consteval bool is_function_call(info);
     consteval expression_kind expression_kind_of(info);
     consteval vector<info> operands_of(info);
 
