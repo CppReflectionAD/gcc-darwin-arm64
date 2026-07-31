@@ -1262,21 +1262,12 @@ maybe_init_meta_operators (location_t loc)
 static tree
 eval_is_variable (const_tree r, reflect_kind kind)
 {
-  /* ^^param is a variable but parameters_of(parent_of(^^param))[0] is not.  */
-  if ((TREE_CODE (r) == PARM_DECL && kind != REFLECT_PARM)
-      || (VAR_P (r)
-	  && kind == REFLECT_UNDEF
-	  /* A structured binding is not a variable.  */
-	  && !(DECL_DECOMPOSITION_P (r) && !DECL_DECOMP_IS_BASE (r)))
-      || (VAR_P (r)
-	  /* Underlying variable of tuple using structured binding is a
-	     variable.  */
-	  && kind == REFLECT_VAR
-	  && DECL_DECOMPOSITION_P (r)
-	  && !DECL_DECOMP_IS_BASE (r)))
-    return boolean_true_node;
-  else
+  if (!r)
     return boolean_false_node;
+  tree_code code = TREE_CODE (r);
+  if (code == VAR_DECL || code == PARM_DECL || code == CONST_DECL || code == RESULT_DECL)
+    return boolean_true_node;
+  return boolean_false_node;
 }
 
 /* Process std::meta::is_type.
@@ -3530,6 +3521,50 @@ eval_is_expression (tree r)
       || code == PARM_DECL
       || code == CONST_DECL
       || code == RESULT_DECL)
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+static tree
+eval_is_literal (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  if (CONSTANT_CLASS_P (r))
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+static tree
+eval_is_unary_operator (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  tree_code code = TREE_CODE (r);
+  if (code < MAX_TREE_CODES && TREE_CODE_CLASS (code) == tcc_unary)
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+static tree
+eval_is_binary_operator (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  tree_code code = TREE_CODE (r);
+  if (code == MODIFY_EXPR || code == INIT_EXPR)
+    return boolean_true_node;
+  if (code < MAX_TREE_CODES && (TREE_CODE_CLASS (code) == tcc_binary || TREE_CODE_CLASS (code) == tcc_comparison))
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+static tree
+eval_is_function_call (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  if (TREE_CODE (r) == CALL_EXPR)
     return boolean_true_node;
   return boolean_false_node;
 }
@@ -8714,6 +8749,14 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_is_statement (h);
     case METAFN_IS_EXPRESSION:
       return eval_is_expression (h);
+    case METAFN_IS_LITERAL:
+      return eval_is_literal (h);
+    case METAFN_IS_UNARY_OPERATOR:
+      return eval_is_unary_operator (h);
+    case METAFN_IS_BINARY_OPERATOR:
+      return eval_is_binary_operator (h);
+    case METAFN_IS_FUNCTION_CALL:
+      return eval_is_function_call (h);
     case METAFN_EXPRESSION_KIND_OF:
       return eval_expression_kind_of (loc, ctx, h, non_constant_p, jump_target,
 				      rettype, fun);
