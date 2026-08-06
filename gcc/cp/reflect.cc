@@ -3620,7 +3620,7 @@ eval_declared_variable_of (location_t loc, const constexpr_ctx *ctx, tree r,
 			  fun, non_constant_p, jump_target);
 }
 
-static tree
+static tree ATTRIBUTE_UNUSED
 eval_constant_of (location_t loc, const constexpr_ctx *ctx, tree r,
 		  bool *non_constant_p, tree *jump_target, tree fun)
 {
@@ -3628,6 +3628,65 @@ eval_constant_of (location_t loc, const constexpr_ctx *ctx, tree r,
     return throw_exception (loc, ctx, "reflection does not represent a constant or literal",
 			    fun, non_constant_p, jump_target);
   return get_reflection_raw (loc, r, REFLECT_UNDEF);
+}
+
+static tree
+find_var_initializer_in_scope (tree var)
+{
+  if (!var || !VAR_P (var))
+    return NULL_TREE;
+  if (DECL_INITIAL (var))
+    return DECL_INITIAL (var);
+
+  tree context = DECL_CONTEXT (var);
+  if (!context || TREE_CODE (context) != FUNCTION_DECL)
+    return NULL_TREE;
+
+  tree body = DECL_SAVED_TREE (context);
+  if (!body)
+    return NULL_TREE;
+
+  struct Walker {
+    tree target_var;
+    tree found_init;
+
+    bool walk (tree stmt) {
+      if (!stmt || found_init) return false;
+      stmt = unwrap_statement_wrappers (stmt);
+      if (!stmt) return false;
+
+      if (TREE_CODE (stmt) == STATEMENT_LIST)
+	{
+	  for (tree_stmt_iterator i = tsi_start (stmt); !tsi_end_p (i); tsi_next (&i))
+	    if (walk (tsi_stmt (i))) return true;
+	}
+      else if (TREE_CODE (stmt) == BIND_EXPR)
+	{
+	  return walk (BIND_EXPR_BODY (stmt));
+	}
+      else if (TREE_CODE (stmt) == INIT_EXPR || TREE_CODE (stmt) == MODIFY_EXPR)
+	{
+	  if (TREE_OPERAND_LENGTH (stmt) > 1 && TREE_OPERAND (stmt, 0) == target_var)
+	    {
+	      found_init = TREE_OPERAND (stmt, 1);
+	      return true;
+	    }
+	}
+      else if (TREE_CODE (stmt) == DECL_EXPR)
+	{
+	  tree d = DECL_EXPR_DECL (stmt);
+	  if (d == target_var && DECL_INITIAL (d))
+	    {
+	      found_init = DECL_INITIAL (d);
+	      return true;
+	    }
+	}
+      return false;
+    }
+  } walker = { var, NULL_TREE };
+
+  walker.walk (body);
+  return walker.found_init;
 }
 
 static tree
@@ -3644,10 +3703,10 @@ eval_initializer_of (location_t loc, const constexpr_ctx *ctx, tree r,
   else if (init && TREE_CODE (init) == DECL_EXPR)
     {
       tree var = DECL_EXPR_DECL (init);
-      init = var ? DECL_INITIAL (var) : NULL_TREE;
+      init = find_var_initializer_in_scope (var);
     }
   else if (init && VAR_P (init))
-    init = DECL_INITIAL (init);
+    init = find_var_initializer_in_scope (init);
 
   init = unwrap_statement_wrappers (init);
   if (init && (TREE_CODE (init) == INIT_EXPR || TREE_CODE (init) == MODIFY_EXPR))
