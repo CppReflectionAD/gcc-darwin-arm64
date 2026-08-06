@@ -3578,6 +3578,37 @@ eval_is_declaration_statement (tree r)
 }
 
 static tree
+eval_declared_variable_of (location_t loc, const constexpr_ctx *ctx, tree r,
+			   bool *non_constant_p, tree *jump_target, tree fun)
+{
+  if (!r)
+    return throw_exception (loc, ctx, "reflection does not represent a declaration statement",
+			    fun, non_constant_p, jump_target);
+  while (r && (TREE_CODE (r) == BIND_EXPR
+	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
+	       || TREE_CODE (r) == EXPR_STMT))
+    {
+      if (TREE_CODE (r) == BIND_EXPR)
+	r = BIND_EXPR_BODY (r);
+      else if (TREE_CODE (r) == CLEANUP_POINT_EXPR)
+	r = TREE_OPERAND (r, 0);
+      else if (TREE_CODE (r) == EXPR_STMT)
+	r = EXPR_STMT_EXPR (r);
+    }
+  tree decl = NULL_TREE;
+  if (r && TREE_CODE (r) == DECL_EXPR)
+    decl = DECL_EXPR_DECL (r);
+  else if (r && DECL_P (r))
+    decl = r;
+
+  if (decl && DECL_P (decl))
+    return get_reflection_raw (loc, decl, REFLECT_UNDEF);
+
+  return throw_exception (loc, ctx, "reflection does not represent a declaration statement",
+			  fun, non_constant_p, jump_target);
+}
+
+static tree
 eval_is_literal (tree r)
 {
   if (!r)
@@ -8796,6 +8827,8 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_is_return_statement (h);
     case METAFN_IS_DECLARATION_STATEMENT:
       return eval_is_declaration_statement (h);
+    case METAFN_DECLARED_VARIABLE_OF:
+      return eval_declared_variable_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_IS_LITERAL:
       return eval_is_literal (h);
     case METAFN_IS_UNARY_OPERATOR:
