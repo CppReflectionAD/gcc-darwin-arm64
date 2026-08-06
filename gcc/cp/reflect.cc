@@ -3551,7 +3551,10 @@ eval_is_return_statement (tree r)
       else if (TREE_CODE (r) == EXPR_STMT)
 	r = EXPR_STMT_EXPR (r);
     }
-  if (r && TREE_CODE (r) == RETURN_EXPR)
+  if (r && (TREE_CODE (r) == RETURN_EXPR
+	    || ((TREE_CODE (r) == INIT_EXPR || TREE_CODE (r) == MODIFY_EXPR)
+		&& TREE_OPERAND_LENGTH (r) > 0
+		&& TREE_CODE (TREE_OPERAND (r, 0)) == RESULT_DECL)))
     return boolean_true_node;
   return boolean_false_node;
 }
@@ -3572,6 +3575,10 @@ eval_is_declaration_statement (tree r)
       else if (TREE_CODE (r) == EXPR_STMT)
 	r = EXPR_STMT_EXPR (r);
     }
+  if (r && (TREE_CODE (r) == INIT_EXPR || TREE_CODE (r) == MODIFY_EXPR)
+      && TREE_OPERAND_LENGTH (r) > 0
+      && TREE_CODE (TREE_OPERAND (r, 0)) == RESULT_DECL)
+    return boolean_false_node;
   if (r && (TREE_CODE (r) == DECL_EXPR || DECL_P (r)))
     return boolean_true_node;
   return boolean_false_node;
@@ -3605,6 +3612,80 @@ eval_declared_variable_of (location_t loc, const constexpr_ctx *ctx, tree r,
     return get_reflection_raw (loc, decl, REFLECT_UNDEF);
 
   return throw_exception (loc, ctx, "reflection does not represent a declaration statement",
+			  fun, non_constant_p, jump_target);
+}
+
+static tree
+eval_constant_of (location_t loc, const constexpr_ctx *ctx, tree r,
+		  bool *non_constant_p, tree *jump_target, tree fun)
+{
+  if (!r)
+    return throw_exception (loc, ctx, "reflection does not represent a constant or literal",
+			    fun, non_constant_p, jump_target);
+  return get_reflection_raw (loc, r, REFLECT_UNDEF);
+}
+
+static tree
+eval_initializer_of (location_t loc, const constexpr_ctx *ctx, tree r,
+		     bool *non_constant_p, tree *jump_target, tree fun)
+{
+  if (!r)
+    return throw_exception (loc, ctx, "reflection does not represent a variable declaration",
+			    fun, non_constant_p, jump_target);
+  if (TREE_CODE (r) == DECL_EXPR)
+    r = DECL_EXPR_DECL (r);
+  if (r && VAR_P (r))
+    {
+      tree init = DECL_INITIAL (r);
+      if (init)
+	{
+	  while (init && (TREE_CODE (init) == CLEANUP_POINT_EXPR
+			  || TREE_CODE (init) == EXPR_STMT))
+	    init = TREE_OPERAND (init, 0);
+	  if (init && (TREE_CODE (init) == INIT_EXPR || TREE_CODE (init) == MODIFY_EXPR))
+	    init = TREE_OPERAND (init, 1);
+	  return get_reflection_raw (loc, init, REFLECT_UNDEF);
+	}
+    }
+  return throw_exception (loc, ctx, "reflection does not represent a variable declaration with initializer",
+			  fun, non_constant_p, jump_target);
+}
+
+static tree
+eval_return_value_of (location_t loc, const constexpr_ctx *ctx, tree r,
+		      bool *non_constant_p, tree *jump_target, tree fun)
+{
+  if (!r)
+    return throw_exception (loc, ctx, "reflection does not represent a return statement",
+			    fun, non_constant_p, jump_target);
+  while (r && (TREE_CODE (r) == BIND_EXPR
+	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
+	       || TREE_CODE (r) == EXPR_STMT))
+    {
+      if (TREE_CODE (r) == BIND_EXPR)
+	r = BIND_EXPR_BODY (r);
+      else if (TREE_CODE (r) == CLEANUP_POINT_EXPR)
+	r = TREE_OPERAND (r, 0);
+      else if (TREE_CODE (r) == EXPR_STMT)
+	r = EXPR_STMT_EXPR (r);
+    }
+  if (r && TREE_CODE (r) == RETURN_EXPR)
+    {
+      tree ret_val = TREE_OPERAND (r, 0);
+      if (ret_val && (TREE_CODE (ret_val) == MODIFY_EXPR || TREE_CODE (ret_val) == INIT_EXPR))
+	ret_val = TREE_OPERAND (ret_val, 1);
+      if (ret_val)
+	return get_reflection_raw (loc, ret_val, REFLECT_UNDEF);
+    }
+  else if (r && (TREE_CODE (r) == INIT_EXPR || TREE_CODE (r) == MODIFY_EXPR)
+	   && TREE_OPERAND_LENGTH (r) > 1
+	   && TREE_CODE (TREE_OPERAND (r, 0)) == RESULT_DECL)
+    {
+      tree ret_val = TREE_OPERAND (r, 1);
+      if (ret_val)
+	return get_reflection_raw (loc, ret_val, REFLECT_UNDEF);
+    }
+  return throw_exception (loc, ctx, "reflection does not represent a return statement",
 			  fun, non_constant_p, jump_target);
 }
 
@@ -8828,6 +8909,10 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_is_declaration_statement (h);
     case METAFN_DECLARED_VARIABLE_OF:
       return eval_declared_variable_of (loc, ctx, h, non_constant_p, jump_target, fun);
+    case METAFN_INITIALIZER_OF:
+      return eval_initializer_of (loc, ctx, h, non_constant_p, jump_target, fun);
+    case METAFN_RETURN_VALUE_OF:
+      return eval_return_value_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_IS_LITERAL:
       return eval_is_literal (h);
     case METAFN_IS_UNARY_OPERATOR:
