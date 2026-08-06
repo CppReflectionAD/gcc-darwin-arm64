@@ -3536,13 +3536,14 @@ eval_is_expression (tree r)
 }
 
 static tree
-eval_is_return_statement (tree r)
+unwrap_statement_wrappers (tree r)
 {
-  if (!r)
-    return boolean_false_node;
   while (r && (TREE_CODE (r) == BIND_EXPR
 	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
-	       || TREE_CODE (r) == EXPR_STMT))
+	       || TREE_CODE (r) == EXPR_STMT
+	       || TREE_CODE (r) == CONVERT_EXPR
+	       || TREE_CODE (r) == NOP_EXPR
+	       || TREE_CODE (r) == TARGET_EXPR))
     {
       if (TREE_CODE (r) == BIND_EXPR)
 	r = BIND_EXPR_BODY (r);
@@ -3550,7 +3551,20 @@ eval_is_return_statement (tree r)
 	r = TREE_OPERAND (r, 0);
       else if (TREE_CODE (r) == EXPR_STMT)
 	r = EXPR_STMT_EXPR (r);
+      else if (TREE_CODE (r) == CONVERT_EXPR || TREE_CODE (r) == NOP_EXPR)
+	r = TREE_OPERAND (r, 0);
+      else if (TREE_CODE (r) == TARGET_EXPR)
+	r = TARGET_EXPR_INITIAL (r) ? TARGET_EXPR_INITIAL (r) : TREE_OPERAND (r, 0);
     }
+  return r;
+}
+
+static tree
+eval_is_return_statement (tree r)
+{
+  r = unwrap_statement_wrappers (r);
+  if (!r)
+    return boolean_false_node;
   if (r && (TREE_CODE (r) == RETURN_EXPR
 	    || ((TREE_CODE (r) == INIT_EXPR || TREE_CODE (r) == MODIFY_EXPR)
 		&& TREE_OPERAND_LENGTH (r) > 0
@@ -3562,24 +3576,22 @@ eval_is_return_statement (tree r)
 static tree
 eval_is_declaration_statement (tree r)
 {
+  r = unwrap_statement_wrappers (r);
   if (!r)
     return boolean_false_node;
-  while (r && (TREE_CODE (r) == BIND_EXPR
-	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
-	       || TREE_CODE (r) == EXPR_STMT))
-    {
-      if (TREE_CODE (r) == BIND_EXPR)
-	r = BIND_EXPR_BODY (r);
-      else if (TREE_CODE (r) == CLEANUP_POINT_EXPR)
-	r = TREE_OPERAND (r, 0);
-      else if (TREE_CODE (r) == EXPR_STMT)
-	r = EXPR_STMT_EXPR (r);
-    }
   if (r && (TREE_CODE (r) == INIT_EXPR || TREE_CODE (r) == MODIFY_EXPR)
       && TREE_OPERAND_LENGTH (r) > 0
       && TREE_CODE (TREE_OPERAND (r, 0)) == RESULT_DECL)
     return boolean_false_node;
-  if (r && (TREE_CODE (r) == DECL_EXPR || DECL_P (r)))
+  if (r && (TREE_CODE (r) == INIT_EXPR || TREE_CODE (r) == MODIFY_EXPR))
+    return boolean_true_node;
+  if (r && TREE_CODE (r) == DECL_EXPR)
+    {
+      tree var = DECL_EXPR_DECL (r);
+      if (var && VAR_P (var) && DECL_INITIAL (var) != NULL_TREE)
+	return boolean_true_node;
+    }
+  else if (r && VAR_P (r) && DECL_INITIAL (r) != NULL_TREE)
     return boolean_true_node;
   return boolean_false_node;
 }
@@ -3588,25 +3600,18 @@ static tree
 eval_declared_variable_of (location_t loc, const constexpr_ctx *ctx, tree r,
 			   bool *non_constant_p, tree *jump_target, tree fun)
 {
+  r = unwrap_statement_wrappers (r);
   if (!r)
     return throw_exception (loc, ctx, "reflection does not represent a declaration statement",
 			    fun, non_constant_p, jump_target);
-  while (r && (TREE_CODE (r) == BIND_EXPR
-	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
-	       || TREE_CODE (r) == EXPR_STMT))
-    {
-      if (TREE_CODE (r) == BIND_EXPR)
-	r = BIND_EXPR_BODY (r);
-      else if (TREE_CODE (r) == CLEANUP_POINT_EXPR)
-	r = TREE_OPERAND (r, 0);
-      else if (TREE_CODE (r) == EXPR_STMT)
-	r = EXPR_STMT_EXPR (r);
-    }
   tree decl = NULL_TREE;
   if (r && TREE_CODE (r) == DECL_EXPR)
     decl = DECL_EXPR_DECL (r);
   else if (r && DECL_P (r))
     decl = r;
+  else if (r && (TREE_CODE (r) == INIT_EXPR || TREE_CODE (r) == MODIFY_EXPR)
+	   && TREE_OPERAND_LENGTH (r) > 0)
+    decl = TREE_OPERAND (r, 0);
 
   if (decl && DECL_P (decl))
     return get_reflection_raw (loc, decl, REFLECT_UNDEF);
@@ -3632,21 +3637,25 @@ eval_initializer_of (location_t loc, const constexpr_ctx *ctx, tree r,
   if (!r)
     return throw_exception (loc, ctx, "reflection does not represent a variable declaration",
 			    fun, non_constant_p, jump_target);
-  if (TREE_CODE (r) == DECL_EXPR)
-    r = DECL_EXPR_DECL (r);
-  if (r && VAR_P (r))
+  tree init = unwrap_statement_wrappers (r);
+
+  if (init && (TREE_CODE (init) == INIT_EXPR || TREE_CODE (init) == MODIFY_EXPR))
+    init = TREE_OPERAND (init, 1);
+  else if (init && TREE_CODE (init) == DECL_EXPR)
     {
-      tree init = DECL_INITIAL (r);
-      if (init)
-	{
-	  while (init && (TREE_CODE (init) == CLEANUP_POINT_EXPR
-			  || TREE_CODE (init) == EXPR_STMT))
-	    init = TREE_OPERAND (init, 0);
-	  if (init && (TREE_CODE (init) == INIT_EXPR || TREE_CODE (init) == MODIFY_EXPR))
-	    init = TREE_OPERAND (init, 1);
-	  return get_reflection_raw (loc, init, REFLECT_UNDEF);
-	}
+      tree var = DECL_EXPR_DECL (init);
+      init = var ? DECL_INITIAL (var) : NULL_TREE;
     }
+  else if (init && VAR_P (init))
+    init = DECL_INITIAL (init);
+
+  init = unwrap_statement_wrappers (init);
+  if (init && (TREE_CODE (init) == INIT_EXPR || TREE_CODE (init) == MODIFY_EXPR))
+    init = TREE_OPERAND (init, 1);
+
+  if (init)
+    return get_reflection_raw (loc, init, REFLECT_UNDEF);
+
   return throw_exception (loc, ctx, "reflection does not represent a variable declaration with initializer",
 			  fun, non_constant_p, jump_target);
 }
@@ -3655,23 +3664,14 @@ static tree
 eval_return_value_of (location_t loc, const constexpr_ctx *ctx, tree r,
 		      bool *non_constant_p, tree *jump_target, tree fun)
 {
+  r = unwrap_statement_wrappers (r);
   if (!r)
     return throw_exception (loc, ctx, "reflection does not represent a return statement",
 			    fun, non_constant_p, jump_target);
-  while (r && (TREE_CODE (r) == BIND_EXPR
-	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
-	       || TREE_CODE (r) == EXPR_STMT))
-    {
-      if (TREE_CODE (r) == BIND_EXPR)
-	r = BIND_EXPR_BODY (r);
-      else if (TREE_CODE (r) == CLEANUP_POINT_EXPR)
-	r = TREE_OPERAND (r, 0);
-      else if (TREE_CODE (r) == EXPR_STMT)
-	r = EXPR_STMT_EXPR (r);
-    }
   if (r && TREE_CODE (r) == RETURN_EXPR)
     {
       tree ret_val = TREE_OPERAND (r, 0);
+      ret_val = unwrap_statement_wrappers (ret_val);
       if (ret_val && (TREE_CODE (ret_val) == MODIFY_EXPR || TREE_CODE (ret_val) == INIT_EXPR))
 	ret_val = TREE_OPERAND (ret_val, 1);
       if (ret_val)
