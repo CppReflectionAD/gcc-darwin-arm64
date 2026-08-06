@@ -3536,6 +3536,48 @@ eval_is_expression (tree r)
 }
 
 static tree
+eval_is_return_statement (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  while (r && (TREE_CODE (r) == BIND_EXPR
+	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
+	       || TREE_CODE (r) == EXPR_STMT))
+    {
+      if (TREE_CODE (r) == BIND_EXPR)
+	r = BIND_EXPR_BODY (r);
+      else if (TREE_CODE (r) == CLEANUP_POINT_EXPR)
+	r = TREE_OPERAND (r, 0);
+      else if (TREE_CODE (r) == EXPR_STMT)
+	r = EXPR_STMT_EXPR (r);
+    }
+  if (r && TREE_CODE (r) == RETURN_EXPR)
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+static tree
+eval_is_declaration_statement (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  while (r && (TREE_CODE (r) == BIND_EXPR
+	       || TREE_CODE (r) == CLEANUP_POINT_EXPR
+	       || TREE_CODE (r) == EXPR_STMT))
+    {
+      if (TREE_CODE (r) == BIND_EXPR)
+	r = BIND_EXPR_BODY (r);
+      else if (TREE_CODE (r) == CLEANUP_POINT_EXPR)
+	r = TREE_OPERAND (r, 0);
+      else if (TREE_CODE (r) == EXPR_STMT)
+	r = EXPR_STMT_EXPR (r);
+    }
+  if (r && (TREE_CODE (r) == DECL_EXPR || DECL_P (r)))
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+static tree
 eval_is_literal (tree r)
 {
   if (!r)
@@ -8749,6 +8791,10 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_is_statement (h);
     case METAFN_IS_EXPRESSION:
       return eval_is_expression (h);
+    case METAFN_IS_RETURN_STATEMENT:
+      return eval_is_return_statement (h);
+    case METAFN_IS_DECLARATION_STATEMENT:
+      return eval_is_declaration_statement (h);
     case METAFN_IS_LITERAL:
       return eval_is_literal (h);
     case METAFN_IS_UNARY_OPERATOR:
