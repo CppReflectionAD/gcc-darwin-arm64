@@ -20,6 +20,11 @@ consteval bool test() {
   if (!is_declaration_statement(stmts[0])) return false;
   if (is_return_statement(stmts[0])) return false;
 
+  // declared_variable_of
+  info var_a = declared_variable_of(stmts[0]);
+  if (!is_variable(var_a)) return false;
+  if (identifier_of(var_a) != "a") return false;
+
   // Stmt 1: return statement return a + 1.0f;
   if (!is_statement(stmts[1])) return false;
   if (!is_return_statement(stmts[1])) return false;
