@@ -3580,6 +3580,28 @@ eval_is_function_call (tree r)
 }
 
 static tree
+eval_declaration_of (location_t loc, const constexpr_ctx *ctx, tree r,
+		     bool *non_constant_p, tree *jump_target, tree fun)
+{
+  if (!r)
+    return throw_exception (loc, ctx, "reflection does not represent an entity or expression",
+			    fun, non_constant_p, jump_target);
+  tree decl = r;
+  if (DECL_P (r))
+    decl = r;
+  else if (TREE_CODE (r) == ADDR_EXPR)
+    decl = TREE_OPERAND (r, 0);
+  else if (EXPR_P (r) && TREE_OPERAND_LENGTH (r) > 0 && DECL_P (TREE_OPERAND (r, 0)))
+    decl = TREE_OPERAND (r, 0);
+
+  if (DECL_P (decl))
+    return get_reflection_raw (loc, decl, REFLECT_UNDEF);
+
+  return throw_exception (loc, ctx, "reflection does not have a declaration",
+			  fun, non_constant_p, jump_target);
+}
+
+static tree
 eval_operands_of (location_t loc, const constexpr_ctx *ctx, tree r,
 		  bool *non_constant_p, tree *jump_target, tree fun)
 {
@@ -8735,6 +8757,8 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_is_binary_operator (h);
     case METAFN_IS_FUNCTION_CALL:
       return eval_is_function_call (h);
+    case METAFN_DECLARATION_OF:
+      return eval_declaration_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_OPERANDS_OF:
       return eval_operands_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_IS_ACCESSIBLE:
