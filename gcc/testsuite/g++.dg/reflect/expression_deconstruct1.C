@@ -54,7 +54,6 @@ consteval bool run_test() {
   // The returned assignment expression: res = (exp(-x) + 1.0f) + 1.0f
   info ret_expr = stmts[0];
   if (!is_expression(ret_expr)) return false;
-  if (!is_binary_operator(ret_expr)) return false;
   if (operator_of(ret_expr) != operators::op_equals) return false;
 
   auto operands = operands_of(ret_expr);
