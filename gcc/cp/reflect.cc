@@ -2520,6 +2520,11 @@ eval_operator_of (location_t loc, const constexpr_ctx *ctx, tree r,
     }
 
   tree_code code = TREE_CODE (r);
+  if (code == RDIV_EXPR || code == EXACT_DIV_EXPR || code == CEIL_DIV_EXPR || code == FLOOR_DIV_EXPR || code == ROUND_DIV_EXPR)
+    code = TRUNC_DIV_EXPR;
+  else if (code == CEIL_MOD_EXPR || code == FLOOR_MOD_EXPR || code == ROUND_MOD_EXPR)
+    code = TRUNC_MOD_EXPR;
+
   if (code == MODIFY_EXPR || code == INIT_EXPR)
     return build_int_cst (ret_type, meta_operators[1][OVL_OP_NOP_EXPR]);
 
@@ -2533,10 +2538,12 @@ eval_operator_of (location_t loc, const constexpr_ctx *ctx, tree r,
 	}
     }
 
-  return throw_exception (loc, ctx,
-			  "reflection does not represent an operator function, "
-			  "operator function template, or operator expression",
-			  fun, non_constant_p, jump_target);
+  char buf[256];
+  snprintf (buf, sizeof (buf),
+	    "reflection does not represent an operator function, "
+	    "operator function template, or operator expression (code=%s)",
+	    get_tree_code_name (code));
+  return throw_exception (loc, ctx, buf, fun, non_constant_p, jump_target);
 }
 
 /* Helper to build a string literal containing '\0' terminated NAME.
@@ -3775,8 +3782,6 @@ eval_is_binary_operator (tree r)
   if (!r)
     return boolean_false_node;
   tree_code code = TREE_CODE (r);
-  if (code == MODIFY_EXPR || code == INIT_EXPR)
-    return boolean_true_node;
   if (code < MAX_TREE_CODES && (TREE_CODE_CLASS (code) == tcc_binary || TREE_CODE_CLASS (code) == tcc_comparison))
     return boolean_true_node;
   return boolean_false_node;
