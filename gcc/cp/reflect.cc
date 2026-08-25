@@ -3307,6 +3307,12 @@ eval_body_of (location_t loc, const constexpr_ctx *ctx, tree r,
 			    fun, non_constant_p, jump_target);
 
   r = maybe_get_first_fn (r);
+  if (r && DECL_P (r))
+    {
+      if (!DECL_SAVED_TREE (r)
+	  && (DECL_TEMPLOID_INSTANTIATION (r) || DECL_TEMPLATE_INFO (r)))
+	instantiate_decl (r, /*defer_ok=*/false, /*expl_inst_class_mem_p=*/false);
+    }
   tree body = DECL_SAVED_TREE (r);
   if (!body)
     return throw_exception (loc, ctx, "function is not defined",
@@ -3354,20 +3360,29 @@ eval_statements_of (location_t loc, const constexpr_ctx *ctx, tree r,
 	    {
 	      if (stmt)
 		{
-		  while (stmt && (TREE_CODE (stmt) == BIND_EXPR
-				  || TREE_CODE (stmt) == CLEANUP_POINT_EXPR
-				  || TREE_CODE (stmt) == EXPR_STMT))
+		  tree unwrapped = stmt;
+		  while (unwrapped && (TREE_CODE (unwrapped) == BIND_EXPR
+				       || TREE_CODE (unwrapped) == CLEANUP_POINT_EXPR
+				       || TREE_CODE (unwrapped) == EXPR_STMT))
 		    {
-		      if (TREE_CODE (stmt) == BIND_EXPR)
-			stmt = BIND_EXPR_BODY (stmt);
-		      else if (TREE_CODE (stmt) == CLEANUP_POINT_EXPR)
-			stmt = TREE_OPERAND (stmt, 0);
-		      else if (TREE_CODE (stmt) == EXPR_STMT)
-			stmt = EXPR_STMT_EXPR (stmt);
+		      if (TREE_CODE (unwrapped) == BIND_EXPR)
+			unwrapped = BIND_EXPR_BODY (unwrapped);
+		      else if (TREE_CODE (unwrapped) == CLEANUP_POINT_EXPR)
+			unwrapped = TREE_OPERAND (unwrapped, 0);
+		      else if (TREE_CODE (unwrapped) == EXPR_STMT)
+			unwrapped = EXPR_STMT_EXPR (unwrapped);
 		    }
-		  if (stmt)
-		    CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
-					    get_reflection_raw (loc, stmt, REFLECT_UNDEF));
+		  if (unwrapped)
+		    {
+		      if (TREE_CODE (unwrapped) == INIT_EXPR
+			  && TREE_OPERAND_LENGTH (unwrapped) > 0
+			  && VAR_P (TREE_OPERAND (unwrapped, 0))
+			  && !DECL_ARTIFICIAL (TREE_OPERAND (unwrapped, 0)))
+			continue;
+
+		      CONSTRUCTOR_APPEND_ELT (elts, NULL_TREE,
+					      get_reflection_raw (loc, unwrapped, REFLECT_UNDEF));
+		    }
 		}
 	    }
 	}
@@ -3595,10 +3610,10 @@ eval_is_declaration_statement (tree r)
   if (r && TREE_CODE (r) == DECL_EXPR)
     {
       tree var = DECL_EXPR_DECL (r);
-      if (var && VAR_P (var) && DECL_INITIAL (var) != NULL_TREE)
+      if (var && VAR_P (var) && !DECL_ARTIFICIAL (var))
 	return boolean_true_node;
     }
-  else if (r && VAR_P (r) && DECL_INITIAL (r) != NULL_TREE)
+  else if (r && VAR_P (r) && !DECL_ARTIFICIAL (r))
     return boolean_true_node;
   return boolean_false_node;
 }
