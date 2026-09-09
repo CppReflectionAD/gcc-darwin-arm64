@@ -2528,6 +2528,9 @@ eval_operator_of (location_t loc, const constexpr_ctx *ctx, tree r,
   if (code == MODIFY_EXPR || code == INIT_EXPR)
     return build_int_cst (ret_type, meta_operators[1][OVL_OP_NOP_EXPR]);
 
+  if (code == NON_LVALUE_EXPR)
+    return build_int_cst (ret_type, meta_operators[0][OVL_OP_PLUS_EXPR]);
+
   if (code < MAX_TREE_CODES)
     {
       int j = ovl_op_mapping[code];
@@ -3780,13 +3783,63 @@ eval_is_literal (tree r)
   return boolean_false_node;
 }
 
+static bool
+is_cast_tree (tree r)
+{
+  if (!r)
+    return false;
+  tree_code code = TREE_CODE (r);
+  return (code == CONVERT_EXPR
+	  || code == NOP_EXPR
+	  || code == VIEW_CONVERT_EXPR
+	  || code == FLOAT_EXPR
+	  || code == FIX_TRUNC_EXPR
+	  || code == STATIC_CAST_EXPR
+	  || code == REINTERPRET_CAST_EXPR
+	  || code == CONST_CAST_EXPR
+	  || code == DYNAMIC_CAST_EXPR
+	  || code == CAST_EXPR);
+}
+
+static tree
+eval_is_cast (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  if (is_cast_tree (r))
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+static tree
+eval_is_construct (tree r)
+{
+  if (!r)
+    return boolean_false_node;
+  tree_code code = TREE_CODE (r);
+  if (code == TARGET_EXPR
+      || code == CONSTRUCTOR
+      || code == AGGR_INIT_EXPR)
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
 static tree
 eval_is_unary_operator (tree r)
 {
   if (!r)
     return boolean_false_node;
   tree_code code = TREE_CODE (r);
-  if (code < MAX_TREE_CODES && TREE_CODE_CLASS (code) == tcc_unary)
+  if (code < MAX_TREE_CODES
+      && (TREE_CODE_CLASS (code) == tcc_unary
+	  || code == UNARY_PLUS_EXPR
+	  || code == ADDR_EXPR
+	  || code == INDIRECT_REF
+	  || code == PREINCREMENT_EXPR
+	  || code == PREDECREMENT_EXPR
+	  || code == POSTINCREMENT_EXPR
+	  || code == POSTDECREMENT_EXPR)
+      && !is_cast_tree (r))
     return boolean_true_node;
   return boolean_false_node;
 }
@@ -9004,6 +9057,10 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_declaration_of (loc, ctx, h, non_constant_p, jump_target, fun);
     case METAFN_OPERANDS_OF:
       return eval_operands_of (loc, ctx, h, non_constant_p, jump_target, fun);
+    case METAFN_IS_CAST:
+      return eval_is_cast (h);
+    case METAFN_IS_CONSTRUCT:
+      return eval_is_construct (h);
     case METAFN_IS_ACCESSIBLE:
       return eval_is_accessible (loc, ctx, h, kind, expr, call,
 				 non_constant_p, jump_target, fun);
