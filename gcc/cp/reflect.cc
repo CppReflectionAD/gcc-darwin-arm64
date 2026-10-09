@@ -3833,6 +3833,89 @@ eval_is_construct (tree r)
   return boolean_false_node;
 }
 
+/* Return the COND_EXPR behind R, or NULL_TREE if R does not represent one.
+
+   A conditional expression `c ? a : b` and a genericized `if` statement are
+   both COND_EXPR at this point; they are told apart by type.  An `if`
+   statement produces no value and so is void-typed, whereas a ternary used
+   for its value is not.  (A ternary whose operands are themselves void, as in
+   `c ? (void)a : (void)b`, is indistinguishable from an `if` here and is
+   therefore not reported as a conditional operator.)  */
+
+static tree
+get_conditional_expr (tree r)
+{
+  r = unwrap_statement_wrappers (r);
+  if (!r || TREE_CODE (r) != COND_EXPR)
+    return NULL_TREE;
+  if (!TREE_TYPE (r) || VOID_TYPE_P (TREE_TYPE (r)))
+    return NULL_TREE;
+  return r;
+}
+
+static tree
+eval_is_conditional_operator (tree r)
+{
+  if (get_conditional_expr (r))
+    return boolean_true_node;
+  return boolean_false_node;
+}
+
+/* Navigate to one operand of a conditional expression.  Unlike
+   eval_is_conditional_operator, this accepts a void-typed COND_EXPR too, so
+   that the branches of a genericized `if` statement can be walked as well.  */
+
+static tree
+eval_conditional_operand (location_t loc, const constexpr_ctx *ctx, tree r,
+			  int opno, bool *non_constant_p, tree *jump_target,
+			  tree fun)
+{
+  tree cond = unwrap_statement_wrappers (r);
+  if (!cond || TREE_CODE (cond) != COND_EXPR)
+    return throw_exception (loc, ctx,
+			    "reflection does not represent a conditional "
+			    "expression", fun, non_constant_p, jump_target);
+
+  tree op = TREE_OPERAND (cond, opno);
+
+  /* In the GNU `c ?: b` extension the condition doubles as the true branch,
+     which GCC models by evaluating it once into a SAVE_EXPR referenced from
+     both positions.  Report the written operand rather than the placeholder.  */
+  if (op && TREE_CODE (op) == SAVE_EXPR)
+    op = TREE_OPERAND (op, 0);
+
+  if (!op)
+    return throw_exception (loc, ctx,
+			    "conditional expression has no such operand",
+			    fun, non_constant_p, jump_target);
+
+  return get_reflection_raw (loc, op, REFLECT_UNDEF);
+}
+
+static tree
+eval_condition_of (location_t loc, const constexpr_ctx *ctx, tree r,
+		   bool *non_constant_p, tree *jump_target, tree fun)
+{
+  return eval_conditional_operand (loc, ctx, r, 0, non_constant_p, jump_target,
+				   fun);
+}
+
+static tree
+eval_true_expression_of (location_t loc, const constexpr_ctx *ctx, tree r,
+			 bool *non_constant_p, tree *jump_target, tree fun)
+{
+  return eval_conditional_operand (loc, ctx, r, 1, non_constant_p, jump_target,
+				   fun);
+}
+
+static tree
+eval_false_expression_of (location_t loc, const constexpr_ctx *ctx, tree r,
+			  bool *non_constant_p, tree *jump_target, tree fun)
+{
+  return eval_conditional_operand (loc, ctx, r, 2, non_constant_p, jump_target,
+				   fun);
+}
+
 static tree
 eval_is_unary_operator (tree r)
 {
@@ -9070,6 +9153,16 @@ process_metafunction (const constexpr_ctx *ctx, tree fun, tree call,
       return eval_is_cast (h);
     case METAFN_IS_CONSTRUCT:
       return eval_is_construct (h);
+    case METAFN_IS_CONDITIONAL_OPERATOR:
+      return eval_is_conditional_operator (h);
+    case METAFN_CONDITION_OF:
+      return eval_condition_of (loc, ctx, h, non_constant_p, jump_target, fun);
+    case METAFN_TRUE_EXPRESSION_OF:
+      return eval_true_expression_of (loc, ctx, h, non_constant_p, jump_target,
+				      fun);
+    case METAFN_FALSE_EXPRESSION_OF:
+      return eval_false_expression_of (loc, ctx, h, non_constant_p,
+				       jump_target, fun);
     case METAFN_IS_ACCESSIBLE:
       return eval_is_accessible (loc, ctx, h, kind, expr, call,
 				 non_constant_p, jump_target, fun);
