@@ -130,13 +130,3 @@ static_assert(test_nested());
 static_assert(test_elvis());
 static_assert(test_if_statement());
 static_assert(test_negative());
-
-int main() {
-  std::printf("relu:         %s\n", test_relu() ? "ok" : "FAIL");
-  std::printf("abs:          %s\n", test_abs() ? "ok" : "FAIL");
-  std::printf("nested:       %s\n", test_nested() ? "ok" : "FAIL");
-  std::printf("elvis:        %s\n", test_elvis() ? "ok" : "FAIL");
-  std::printf("if statement: %s\n", test_if_statement() ? "ok" : "FAIL");
-  std::printf("negative:     %s\n", test_negative() ? "ok" : "FAIL");
-  return 0;
-}
