@@ -32,6 +32,7 @@
 #include "tree.h"
 #include "memmodel.h"
 #include "gimple.h"
+#include "internal-fn.h"
 #include "cfghooks.h"
 #include "cfgloop.h"
 #include "df.h"
@@ -2334,6 +2335,40 @@ aarch64_try_widen_mult_by_pow2 (const gassign *convert,
   return true;
 }
 
+/* Try to use the sdiv_pow2 optab for signed vector division by a constant
+   power of two.  */
+static bool
+aarch64_try_sdiv_pow2 (const gassign *assign, gimple_stmt_iterator *gsi)
+{
+  tree lhs = gimple_assign_lhs (assign);
+  tree type = TREE_TYPE (lhs);
+
+  if (!VECTOR_INTEGER_TYPE_P (type)
+      || TYPE_UNSIGNED (type)
+      || !direct_internal_fn_supported_p (IFN_DIV_POW2, type,
+					   OPTIMIZE_FOR_BOTH))
+    return false;
+
+  tree dividend = gimple_assign_rhs1 (assign);
+  tree divisor = uniform_integer_cst_p (gimple_assign_rhs2 (assign));
+
+  /* Check that the divisor is a constant positive power of two.  */
+  if (!divisor
+      || tree_int_cst_sgn (divisor) != 1
+      || !integer_pow2p (divisor))
+    return false;
+
+  tree shift = build_int_cst (TREE_TYPE (type), tree_log2 (divisor));
+  shift = build_vector_from_val (type, shift);
+
+  gcall *call = gimple_build_call_internal (IFN_DIV_POW2, 2,
+					     dividend, shift);
+  gimple_call_set_lhs (call, lhs);
+  gimple_set_location (call, gimple_location (assign));
+  gsi_replace (gsi, call, false);
+  return true;
+}
+
 /* Implement TARGET_MAX_NOCE_IFCVT_SEQ_COST.  If an explicit max was set then
    honor it, otherwise apply a tuning specific scale to branch costs.  */
 
@@ -4577,6 +4612,10 @@ aarch64_instruction_selection (function *fun, gimple_stmt_iterator *gsi)
 
   if (!assign)
     return false;
+
+  if (gimple_assign_rhs_code (assign) == TRUNC_DIV_EXPR
+      && aarch64_try_sdiv_pow2 (assign, gsi))
+    return true;
 
   if (CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (assign))
       && aarch64_try_widen_mult_by_pow2 (assign, gsi))
@@ -15599,7 +15638,9 @@ aarch64_extr_rtx_p (rtx x, rtx *res_op0, rtx *res_op1)
   *res_op0 = NULL_RTX;
   *res_op1 = NULL_RTX;
 
-  if (GET_CODE (x) != IOR)
+  if (GET_CODE (x) != IOR
+      && GET_CODE (x) != XOR
+      && GET_CODE (x) != PLUS)
     return false;
 
   op0 = XEXP (x, 0);
@@ -23630,7 +23671,20 @@ aarch64_gimplify_va_arg_expr (tree valist, tree type, gimple_seq *pre_p,
   tree t, u, cond1, cond2;
 
   if (TARGET_MACHO)
-    return std_gimplify_va_arg_expr (valist, type, pre_p, post_p);
+    {
+      /* darwinpcs passes every variadic argument on the stack, so the generic
+	 lowering is used and none of the code below is reached.  The
+	 -mgeneral-regs-only check still has to be made here: otherwise the
+	 option is silently ignored for a va_arg of a floating-point or vector
+	 type, although it is diagnosed for the same type in an argument list
+	 (aarch64_layout_arg).  */
+      if (!TARGET_FLOAT
+	  && aarch64_vfp_is_call_or_return_candidate (TYPE_MODE (type), type,
+						      &ag_mode, &nregs, &is_ha,
+						      false))
+	aarch64_err_no_fpadvsimd (TYPE_MODE (type));
+      return std_gimplify_va_arg_expr (valist, type, pre_p, post_p);
+    }
 
   indirect_p = pass_va_arg_by_reference (type);
   if (indirect_p)
@@ -24765,6 +24819,12 @@ aarch64_autovectorize_vector_modes (vector_modes *modes, bool)
        for this case.  */
     V2SImode
   };
+
+  if (aarch64_force_autovec_mode != VOIDmode)
+    {
+      modes->safe_push (aarch64_force_autovec_mode);
+      return 0;
+    }
 
   /* Try using N-byte SVE modes only after trying N-byte Advanced SIMD mode.
      This is because:
@@ -26138,6 +26198,15 @@ aarch64_simd_check_vect_par_cnst_half (rtx op, machine_mode mode,
   return true;
 }
 
+/* Return true if X is the low element of vector V, in the lowpart form
+   that RTL simplification uses for it.  */
+
+bool
+aarch64_simd_lowpart_of_p (rtx x, rtx v)
+{
+  return rtx_equal_p (x, lowpart_subreg (GET_MODE (x), v, GET_MODE (v)));
+}
+
 /* Return a PARALLEL containing NELTS elements, with element I equal
    to BASE + I * STEP.  */
 
@@ -27506,14 +27575,14 @@ aarch64_convert_mult_to_shift (rtx value, rtx_code &code)
   return builder.build ();
 }
 
-/* Prepare for an integer SVE multiply-add or multiply-subtract pattern;
+/* Prepare for an integer vector multiply-add or multiply-subtract pattern.
    CODE is PLUS for the former and MINUS for the latter.  OPERANDS is the
    operands array, in the same order as for fma_optab.  Return true if
    the function emitted all the necessary instructions, false if the caller
    should generate the pattern normally with the new OPERANDS array.  */
 
 bool
-aarch64_prepare_sve_int_fma (rtx *operands, rtx_code code)
+aarch64_prepare_int_fma (rtx *operands, rtx_code code)
 {
   machine_mode mode = GET_MODE (operands[0]);
   if (rtx shifts = aarch64_convert_mult_to_shift (operands[2], code))
@@ -27605,6 +27674,13 @@ aarch64_is_variant_pcs (tree fndecl)
 static void
 aarch64_asm_output_variant_pcs (FILE *stream, const tree decl, const char* name)
 {
+  /* Mach-O has no symbol flag to carry this, and nothing consumes it; clang
+     emits no marking at all.  Darwin already skipped it for definitions, since
+     ASM_DECLARE_FUNCTION_NAME is overridden there and so never reaches here --
+     do the same on the alias and undefined-symbol paths.  */
+  if (TARGET_MACHO)
+    return;
+
   if (TREE_CODE (decl) == FUNCTION_DECL
       && aarch64_is_variant_pcs (decl))
     {
@@ -27716,6 +27792,13 @@ aarch64_print_patchable_function_entry (FILE *file,
 					unsigned HOST_WIDE_INT patch_area_size,
 					bool record_p)
 {
+  /* Mach-O has no consumer for the table of patchable entries, and the
+     section name the generic code uses for it is not a valid Mach-O section
+     specification, so recording makes the output unassemblable.  clang emits
+     the NOPs alone there; do the same.  */
+  if (TARGET_MACHO)
+    record_p = false;
+
   if (!cfun->machine->label_is_assembled)
     {
       /* Emit the patching area before the entry label, if any.  */
@@ -30502,6 +30585,38 @@ aarch64_asan_shadow_offset (void)
     return (HOST_WIDE_INT_1 << 36);
 }
 
+/* Implement TARGET_CCMP_FIRST_PREFERENCE.  */
+
+static ccmp_first_kind
+aarch64_ccmp_first_preference (machine_mode mode, tree_code code,
+			       const_tree op0, const_tree op1)
+{
+  if (SCALAR_FLOAT_MODE_P (mode))
+    {
+      if (!((mode == HFmode && TARGET_FP_F16INST)
+	    || mode == SFmode || mode == DFmode))
+	return CCMP_FIRST_UNSUPPORTED;
+      return real_zerop (op1) ? CCMP_FIRST_PREFERRED : CCMP_FIRST_NONE;
+    }
+
+  if (!(mode == QImode || mode == HImode
+	|| mode == SImode || mode == DImode))
+    return CCMP_FIRST_UNSUPPORTED;
+
+  if (TREE_CODE (op1) != INTEGER_CST)
+    return CCMP_FIRST_NONE;
+
+  scalar_int_mode int_mode = as_a <scalar_int_mode> (mode);
+  rtx_code rcode = get_rtx_code (code, TYPE_UNSIGNED (TREE_TYPE (op0)));
+  rtx imm = immed_wide_int_const
+    (wi::to_wide (op1, GET_MODE_PRECISION (int_mode)), int_mode);
+  canonicalize_comparison (int_mode, &rcode, &imm);
+
+  return (aarch64_plus_immediate (imm, int_mode)
+	  && !aarch64_ccmp_immediate (imm, int_mode)
+	  ? CCMP_FIRST_PREFERRED : CCMP_FIRST_NONE);
+}
+
 static rtx
 aarch64_gen_ccmp_first (rtx_insn **prep_seq, rtx_insn **gen_seq,
 			rtx_code code, tree treeop0, tree treeop1)
@@ -30706,6 +30821,9 @@ aarch64_gen_ccmp_next (rtx_insn **prep_seq, rtx_insn **gen_seq, rtx prev,
 
 #undef TARGET_GEN_CCMP_FIRST
 #define TARGET_GEN_CCMP_FIRST aarch64_gen_ccmp_first
+
+#undef TARGET_CCMP_FIRST_PREFERENCE
+#define TARGET_CCMP_FIRST_PREFERENCE aarch64_ccmp_first_preference
 
 #undef TARGET_GEN_CCMP_NEXT
 #define TARGET_GEN_CCMP_NEXT aarch64_gen_ccmp_next
@@ -34711,13 +34829,37 @@ machine_mode
 aarch64_darwin_promote_fn_mode (const_tree type, machine_mode mode,
 			       int *punsignedp,
 			       const_tree funtype ATTRIBUTE_UNUSED,
-			       int for_return ATTRIBUTE_UNUSED)
+			       int for_return)
 {
   /* With the amended use of promote using cargs, the only cases that arrive
      here with for_return == 0 are from combine (where the value is definitely
      in a register) and for libcalls, where type == NULL.  We want to promote
      function return values in the callee, so this becomes pretty much
      unconditional now.  */
+  /* As in the _ca variant below: __mfp8 is an integer type in QImode but is
+     passed and returned in a SIMD register, so it must not be promoted.
+     TODO: the handling of argument and return value promotion here needs a
+     full evaluation.  In particular, this exemption has to be kept in step
+     with PROMOTE_MODE (see aarch64.h), since expr.cc asserts that the two
+     agree for a call result; it would likely be better to decide this once
+     in a common place -- aarch64_vfp_is_call_or_return_candidate already
+     tests the type to work out that __mfp8 travels in a SIMD register -- and
+     have both promotion paths consult that, rather than repeating the type
+     test in each.
+     The exemption must NOT apply when for_return == 2.  The documented
+     contract for that value (see TARGET_PROMOTE_FUNCTION_MODE in target.def)
+     is that the hook returns the same mode as promote_mode; it asks which
+     register an incoming parameter is copied to, or an outgoing result
+     computed in, not how the value crosses the ABI boundary.  expr.cc relies
+     on that when it recomputes the mode of a call result, so exempting mf8
+     here previously forced the same exemption into PROMOTE_MODE to keep the
+     two in step -- which made *storage* promotion type-sensitive and so made
+     the promoted modes of an __mfp8 and an unsigned char in one SSA partition
+     disagree (ICE in set_rtl, cfgexpand.cc:213, on a PHI mixing the two).  */
+  if (type && for_return != 2
+      && TYPE_MAIN_VARIANT (type) == aarch64_mfp8_type_node)
+    return mode;
+
   if (type != NULL_TREE)
     return promote_mode (type, mode, punsignedp);
   return mode;
@@ -34735,6 +34877,14 @@ aarch64_darwin_promote_function_mode_ca (cumulative_args_t ca,
 {
   tree type = arg.type;
   machine_mode mode = arg.mode;
+
+  /* __mfp8 is an 8-bit unsigned integer type with QImode, but it is laid out
+     in a SIMD register (see aarch64_vfp_is_call_or_return_candidate, which
+     tests the type).  Promoting it here makes the caller place the value in
+     a general register, while the callee still reads the SIMD one.  */
+  if (type && TYPE_MAIN_VARIANT (type) == aarch64_mfp8_type_node)
+    return mode;
+
   machine_mode new_mode = promote_mode (type, mode, punsignedp);
   if (new_mode == mode || arg.named == false
       || GET_MODE_CLASS (new_mode) != MODE_INT
@@ -35686,7 +35836,7 @@ aarch64_libgcc_floating_mode_supported_p
 #define TARGET_ASM_FUNCTION_EPILOGUE aarch64_sls_emit_blr_function_thunks
 
 #undef TARGET_HAVE_SHADOW_CALL_STACK
-#define TARGET_HAVE_SHADOW_CALL_STACK true
+#define TARGET_HAVE_SHADOW_CALL_STACK AARCH64_HAVE_SHADOW_CALL_STACK
 
 #undef TARGET_CONST_ANCHOR
 #define TARGET_CONST_ANCHOR 0x1000000

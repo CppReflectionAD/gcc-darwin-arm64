@@ -7411,10 +7411,24 @@ grokdeclarator (const struct c_declarator *declarator,
 			&& size_maybe_const
 			&& DECL_INITIAL (maybe_const_size))
 		      {
-			size = DECL_INITIAL (maybe_const_size);
-			size = c_fully_fold (size, false, &size_maybe_const);
-			size_int_const = (TREE_CODE (size) == INTEGER_CST
-					  && !TREE_OVERFLOW (size));
+			/* Substitute the initializer only when it is a
+			   constant, which is the case this extension is
+			   for; a non-constant one would make the type
+			   variably modified by an expression needing a
+			   temporary.  Leave those as ordinary VLAs.  */
+			bool init_maybe_const = true;
+			tree init
+			  = c_fully_fold (DECL_INITIAL (maybe_const_size),
+					  false, &init_maybe_const);
+			if (TREE_CODE (init) == INTEGER_CST
+			    && !TREE_OVERFLOW (init))
+			  {
+			    size = init;
+			    size_maybe_const = init_maybe_const;
+			    size_int_const = true;
+			  }
+			else
+			  size_const_var = false;
 		      }
 		  }
 

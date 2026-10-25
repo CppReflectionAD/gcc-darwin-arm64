@@ -1678,7 +1678,7 @@ optimize_agr_copyprop_1 (gimple *stmt, gimple *use_stmt,
       print_gimple_stmt (dump_file, use_stmt, 0, dump_flags);
     }
   if (maybe_clean_or_replace_eh_stmt (orig_stmt, use_stmt))
-    bitmap_set_bit (to_purge, gimple_bb (stmt)->index);
+    bitmap_set_bit (to_purge, gimple_bb (use_stmt)->index);
   statistics_counter_event (cfun, "copy prop for aggregate", 1);
 }
 
@@ -3515,6 +3515,16 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
       return false;
     }
 
+  /* The sequence below computes the result in int, for a CLZ as
+     INPUT_BITS - 1 minus the count.  If the table entry for zero does not
+     survive that, select it in TYPE after the conversion instead.  */
+  HOST_WIDE_INT table_zero = zero_val;
+  bool late_select
+    = (!wi::fits_to_tree_p (zero_val, integer_type_node)
+       || (fn == IFN_CLZ
+	   && !wi::fits_to_tree_p (input_bits - 1 - zero_val,
+				 integer_type_node)));
+
   HOST_WIDE_INT ctz_val = -1;
   bool zero_ok;
   if (fn == IFN_CTZ)
@@ -3528,9 +3538,12 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
       ctz_val = 32;
       zero_ok = CLZ_DEFINED_VALUE_AT_ZERO (SCALAR_INT_TYPE_MODE (input_type),
 					   ctz_val) == 2;
-      zero_val = input_bits - 1 - zero_val;
+      if (!late_select)
+	zero_val = input_bits - 1 - zero_val;
     }
-  int nargs = 2;
+  /* Pass the value at zero only if the target defines it; otherwise the
+     COND_EXPR below supplies the result for zero.  */
+  int nargs = zero_ok ? 2 : 1;
 
   /* If the input value can't be zero, don't special case ctz (0).  */
   range_query *q = get_range_query (cfun);
@@ -3544,6 +3557,7 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
       zero_val = 0;
       ctz_val = 0;
       nargs = 1;
+      late_select = false;
     }
 
   gimple_seq seq = NULL;
@@ -3558,7 +3572,7 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
 
   tree prev_lhs = gimple_call_lhs (call);
 
-  if (zero_ok && zero_val == ctz_val)
+  if (late_select || (zero_ok && zero_val == ctz_val))
     ;
   /* Emit ctz (x) & 31 if ctz (0) is 32 but we need to return 0.  */
   else if (zero_ok && zero_val == 0 && ctz_val == input_bits)
@@ -3600,7 +3614,22 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
       prev_lhs = gimple_assign_lhs (g);
     }
 
-  g = gimple_build_assign (gimple_assign_lhs (stmt), NOP_EXPR, prev_lhs);
+  if (late_select)
+    {
+      g = gimple_build_assign (make_ssa_name (type), NOP_EXPR, prev_lhs);
+      gimple_set_location (g, gimple_location (stmt));
+      gimple_seq_add_stmt (&seq, g);
+      prev_lhs = gimple_assign_lhs (g);
+      g = gimple_build_assign (make_ssa_name (boolean_type_node), EQ_EXPR,
+			       res_ops[0], build_zero_cst (input_type));
+      gimple_set_location (g, gimple_location (stmt));
+      gimple_seq_add_stmt (&seq, g);
+      g = gimple_build_assign (gimple_assign_lhs (stmt), COND_EXPR,
+			       gimple_assign_lhs (g),
+			       build_int_cst (type, table_zero), prev_lhs);
+    }
+  else
+    g = gimple_build_assign (gimple_assign_lhs (stmt), NOP_EXPR, prev_lhs);
   gimple_seq_add_stmt (&seq, g);
   gsi_replace_with_seq (gsi, seq, true);
   return true;
@@ -4819,6 +4848,7 @@ simplify_phi_result_movdiv (gimple *stmt, tree_code code)
 {
   tree rhs1 = gimple_assign_rhs1 (stmt);
   tree_code new_code;
+  bool needs_reset = false;
 
   /* Skip complex types (PR127163) */
   if (!INTEGRAL_TYPE_P (TREE_TYPE (rhs1)))
@@ -4828,9 +4858,17 @@ simplify_phi_result_movdiv (gimple *stmt, tree_code code)
     {
       case TRUNC_MOD_EXPR:
       case FLOOR_MOD_EXPR:
-	if (!tree_expr_nonnegative_p (rhs1)
-	    && !use_in_zero_equality (gimple_assign_lhs (stmt), true))
-	  return false;
+	if (!tree_expr_nonnegative_p (rhs1))
+	  {
+	    /* For a negative X, the truncating X % 2^k and X & (2^k - 1)
+	       differ (e.g. -3 % 4 is -3 but -3 & 3 is 1), though both are
+	       zero for the same X.  That is enough when the result is only
+	       compared with zero, but the range recorded for the MOD result
+	       no longer holds for the AND, so reset it.  */
+	    needs_reset = true;
+	    if (!use_in_zero_equality (gimple_assign_lhs (stmt), true))
+	      return false;
+	  }
 
 	new_code = BIT_AND_EXPR;
 	break;
@@ -4889,6 +4927,8 @@ simplify_phi_result_movdiv (gimple *stmt, tree_code code)
 
   gimple_assign_set_rhs2 (stmt, new_phires);
   gimple_assign_set_rhs_code (stmt, new_code);
+  if (needs_reset)
+    reset_flow_sensitive_info (gimple_assign_lhs (stmt));
   update_stmt (stmt);
 
   gsi = gsi_for_phi (phi);
@@ -5018,6 +5058,15 @@ simplify_permutation (gimple_stmt_iterator *gsi)
 	return false;
       op3 = gimple_assign_rhs3 (def_stmt);
       if (TREE_CODE (op3) != VECTOR_CST)
+	return false;
+      /* is_combined_permutation_identity assumes that both permutes and
+	 their inputs have the same number of elements.  Mixed widths are
+	 left to the match.pd VEC_PERM merge patterns.  */
+      if (maybe_ne (TYPE_VECTOR_SUBPARTS (TREE_TYPE (op2)),
+		    TYPE_VECTOR_SUBPARTS (TREE_TYPE (op3)))
+	  || maybe_ne (TYPE_VECTOR_SUBPARTS (TREE_TYPE (op0)),
+		       TYPE_VECTOR_SUBPARTS
+			 (TREE_TYPE (gimple_assign_rhs1 (def_stmt)))))
 	return false;
       ident = is_combined_permutation_identity (op3, op2);
       if (!ident)
@@ -6743,6 +6792,12 @@ pass_forwprop::execute (function *fun)
 	  gimple *stmt = gsi_stmt (gsi);
 	  tree lhs, rhs;
 	  enum tree_code code;
+
+	  if (is_gimple_debug (stmt))
+	    {
+	      gsi_next (&gsi);
+	      continue;
+	    }
 
 	  gimple_set_uid (stmt, uid++);
 

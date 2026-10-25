@@ -50,6 +50,7 @@ zero_to_fpr ()
 /*
 ** fpr_to_gpr:
 **	(fmov	w0, s0|umov	w0, v0.b\[0\])
+*M	and	w0, w0, 255
 **	ret
 */
 uint8_t

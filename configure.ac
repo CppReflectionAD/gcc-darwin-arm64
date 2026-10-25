@@ -845,8 +845,6 @@ esac
 
 # Disable libffi for some systems.
 case "${target}" in
-  aarch64*-*-darwin2*)
-    ;;
   powerpc-*-darwin*)
     ;;
   i[[3456789]]86-*-darwin*)
@@ -2569,10 +2567,11 @@ if test -d ${srcdir}/gcc; then
         esac
 
         # Disable jit if -enable-host-shared not specified
-        # but not if building for Mingw. All code in Windows
+        # but not if building for MinGW or Cygwin. All code in Windows
         # is position independent code (PIC).
         case $target in
           *mingw*) ;;
+          *cygwin*) ;;
           *)
           case ${add_this_lang}:${language}:${host_shared} in
             yes:jit:no)
@@ -3946,9 +3945,7 @@ esac
 
 case "$target" in
   x86_64-*mingw* | *-w64-mingw*)
-  # MinGW-w64 does not use newlib, nor does it use winsup. It may,
-  # however, use a symlink named 'mingw' in ${prefix} .
-    FLAGS_FOR_TARGET=$FLAGS_FOR_TARGET' -L${prefix}/${target}/lib -L${prefix}/mingw/lib -isystem ${prefix}/${target}/include -isystem ${prefix}/mingw/include'
+  # MinGW-w64 does not use newlib, nor does it use winsup. No special flags needed.
     ;;
   *-mingw*)
   # MinGW can't be handled as Cygwin above since it does not use newlib.

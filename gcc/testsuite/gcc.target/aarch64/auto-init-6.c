@@ -1,6 +1,11 @@
 /* Verify pattern initialization for complex type automatic variables.  */
 /* { dg-do compile } */
 /* { dg-options "-ftrivial-auto-var-init=pattern" } */
+/* The unwind tables are not the subject of this test and it has no function
+   body scans, so switch them off on Darwin.  Both options are needed.  Without
+   them the CIE, which Darwin emits as data directives because its assembler has
+   no .cfi_* support, would contribute a further ".long 0".  */
+/* { dg-additional-options "-fno-unwind-tables -fno-asynchronous-unwind-tables" { target *-*-darwin* } } */
 
 #ifdef __APPLE__
 # define TYPE _Float128
@@ -20,4 +25,6 @@ _Complex TYPE foo()
   return result;
 }
 
-/* { dg-final { scan-assembler-times "word\t-16843010" 14  } } */
+/* Mach-O's ".word" is a 16-bit entity, so Darwin spells a 4-byte datum ".long".  */
+/* { dg-final { scan-assembler-times "word\t-16843010" 14  { target { ! *-*-darwin* } } } } */
+/* { dg-final { scan-assembler-times "\.long\t-16843010" 14 { target *-*-darwin* } } } */

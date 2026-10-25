@@ -215,8 +215,7 @@ extern bool default_valid_pointer_mode (scalar_int_mode);
 extern bool default_ref_may_alias_errno (class ao_ref *);
 extern scalar_int_mode default_addr_space_pointer_mode (addr_space_t);
 extern scalar_int_mode default_addr_space_address_mode (addr_space_t);
-extern bool default_addr_space_valid_pointer_mode (scalar_int_mode,
-						   addr_space_t);
+extern bool default_addr_space_valid_pointer_mode (machine_mode, addr_space_t);
 extern bool default_addr_space_legitimate_address_p (machine_mode, rtx, bool,
 						     addr_space_t, code_helper);
 extern rtx default_addr_space_legitimize_address (rtx, rtx, machine_mode,
@@ -231,6 +230,8 @@ extern rtx default_addr_space_convert (rtx, tree, tree);
 extern unsigned int default_case_values_threshold (void);
 extern bool default_have_conditional_execution (void);
 extern bool default_have_ccmp (void);
+extern ccmp_first_kind default_ccmp_first_preference
+  (machine_mode, tree_code, const_tree, const_tree);
 
 extern bool default_libc_has_function (enum function_class, tree);
 extern bool default_libc_has_fast_function (int fcode);

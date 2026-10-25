@@ -2807,6 +2807,9 @@ gimple_signed_or_unsigned_type (bool unsignedp, tree type)
       || TYPE_UNSIGNED (type) == unsignedp)
     return type;
 
+  if (BITINT_TYPE_P (type))
+    return build_bitint_type (TYPE_PRECISION (type), unsignedp);
+
 #define TYPE_OK(node)							    \
   (TYPE_MODE (type) == TYPE_MODE (node)					    \
    && TYPE_PRECISION (type) == TYPE_PRECISION (node))
@@ -2891,7 +2894,8 @@ gimple_get_alias_set (tree t)
     return 0;
 
   /* Allow aliasing between signed and unsigned variants of the same
-     type.  We treat the signed variant as canonical.  */
+     type.  We treat the signed variant as canonical.  BITINT_TYPEs
+     are handled by canonical type merging.  */
   if (TREE_CODE (t) == INTEGER_TYPE && TYPE_UNSIGNED (t))
     {
       tree t1 = gimple_signed_type (t);
@@ -2912,34 +2916,6 @@ gimple_get_alias_set (tree t)
     }
 
   return -1;
-}
-
-
-/* Helper for gimple_ior_addresses_taken_1.  */
-
-static bool
-gimple_ior_addresses_taken_1 (gimple *, tree addr, tree, void *data)
-{
-  bitmap addresses_taken = (bitmap)data;
-  addr = get_base_address (addr);
-  if (addr
-      && DECL_P (addr))
-    {
-      bitmap_set_bit (addresses_taken, DECL_UID (addr));
-      return true;
-    }
-  return false;
-}
-
-/* Set the bit for the uid of all decls that have their address taken
-   in STMT in the ADDRESSES_TAKEN bitmap.  Returns true if there
-   were any in this stmt.  */
-
-bool
-gimple_ior_addresses_taken (bitmap addresses_taken, gimple *stmt)
-{
-  return walk_stmt_load_store_addr_ops (stmt, addresses_taken, NULL, NULL,
-					gimple_ior_addresses_taken_1);
 }
 
 

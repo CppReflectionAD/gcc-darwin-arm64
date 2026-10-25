@@ -1,7 +1,6 @@
 /* { dg-do assemble } */
 /* { dg-require-effective-target lp64 } */
 /* { dg-options "-O1 --save-temps" } */
-/* { dg-xfail-if "issue #100" { *-*-darwin* } } */
 
 #pragma GCC push_options
 #pragma GCC target ("+nothing+simd,cmodel=small")
@@ -47,4 +46,6 @@ cal3 (double a)
     return 1;
 }
 
-/* { dg-final { scan-assembler-times "adrp" 3 { xfail *-*-darwin* } } } */
+/* The middle function needs the large code model, so the count is only
+   correct when that model is supported.  */
+/* { dg-final { scan-assembler-times "adrp" 3 { target aarch64_mcmodel_large } } } */

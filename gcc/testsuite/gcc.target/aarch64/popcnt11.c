@@ -1,4 +1,5 @@
 /* { dg-do compile } */
+/* { dg-skip-if "SVE is not available on Darwin" { *-*-darwin* } } */
 /* { dg-options "-O2 -march=armv8.2-a+sve" } */
 /* { dg-final { check-function-bodies "**" "" "" } } */
 
@@ -17,10 +18,10 @@ f_qi (unsigned char *a)
 
 /*
 ** f_hi:
-**	ldr	h([0-9]+), \[x0\]
 **	ptrue	(p[0-7]).b, vl8
-**	cnt	z\1.h, \2/m, z\1.h
-**	smov	w0, v\1.h\[0\]
+**	ldr	h([0-9]+), \[x0\]
+**	cnt	z\2.h, \1/m, z\2.h
+**	smov	w0, v\2.h\[0\]
 **	ret
 */
 unsigned
@@ -31,10 +32,10 @@ f_hi (unsigned short *a)
 
 /*
 ** f_si:
-**	ldr	s([0-9]+), \[x0\]
 **	ptrue	(p[0-7]).b, vl8
-**	cnt	z\1.s, \2/m, z\1.s
-**	umov	x0, v\1.d\[0\]
+**	ldr	s([0-9]+), \[x0\]
+**	cnt	z\2.s, \1/m, z\2.s
+**	umov	x0, v\2.d\[0\]
 **	ret
 */
 unsigned
