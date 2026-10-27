@@ -88,7 +88,10 @@ along with GCC; see the file COPYING3.  If not see
 "%{!mkernel:%{!static:-fPIC}} " DARWIN_CC1_SPEC
 
 #undef ASM_SPEC
-#define ASM_SPEC "-arch %(darwin_arch) %{march*} %{mtune*}  %{static} "\
+/* Do not pass -mtune= to the assembler: it is a scheduling hint with no
+   effect on assembly, and the system assembler rejects tune names that it
+   does not share with GCC (e.g. generic-armv9-a).  */
+#define ASM_SPEC "-arch %(darwin_arch) %{march*} %{static} "\
   ASM_MMACOSX_VERSION_MIN_SPEC
 
 #undef ENDFILE_SPEC
@@ -154,14 +157,24 @@ along with GCC; see the file COPYING3.  If not see
 #undef CALL_USED_X18
 #define CALL_USED_X18 0
 
-/* Assign a static chain regnum.  At the moment using R16 (IP0) is
-   available.  */
+/* Since X18 belongs to the OS, ShadowCallStack cannot be provided; it would
+   need X18 for its shadow stack pointer.  */
+#undef AARCH64_HAVE_SHADOW_CALL_STACK
+#define AARCH64_HAVE_SHADOW_CALL_STACK false
+
+/* Assign a static chain regnum.  R18 is the platform register here, so the
+   generic choice is unavailable.  Use R17 (IP1) rather than R16 (IP0): IP0 is
+   taken as a scratch register during prologue expansion (the SME PSTATE.SM
+   save), which would destroy the incoming chain of a nested function before
+   it has been copied out.  Nothing in prologue expansion uses IP1.  */
 #undef STATIC_CHAIN_REGNUM
-#define STATIC_CHAIN_REGNUM	R16_REGNUM
+#define STATIC_CHAIN_REGNUM	R17_REGNUM
 
 /* Heap trampoline support in a CRT.  */
 #undef DARWIN_HEAP_T_LIB
 #define DARWIN_HEAP_T_LIB " -lheapt_w "
+#undef DARWIN_SME_RT_LIB
+#define DARWIN_SME_RT_LIB " -lsme_rt "
 
 #define SUBTARGET_ENCODE_SECTION_INFO  darwin_encode_section_info
 

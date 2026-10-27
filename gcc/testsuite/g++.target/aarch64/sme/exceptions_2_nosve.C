@@ -75,11 +75,11 @@ int s_caller1() __arm_streaming
 /*
 ** _Z9s_caller2v:
 **	...
-**	bl	__cxa_begin_catch
+**	bl	_?__cxa_begin_catch
 **	smstart	sm
-**	bl	_Z11s_callee_nev
+**	bl	_?_Z11s_callee_nev
 **	smstop	sm
-**	bl	__cxa_end_catch
+**	bl	_?__cxa_end_catch
 **	smstart	sm
 **	...
 */

@@ -2432,6 +2432,7 @@ match_derived_type_spec (gfc_typespec *ts)
   bool is_pdt_template = false;
 
   old_locus = gfc_current_locus;
+  type_param_spec_list = NULL;
 
   if (gfc_match ("%n", name) != MATCH_YES)
     {
@@ -2819,13 +2820,17 @@ cleanup:
 }
 
 
+/* Counter used to uniquify shadow-variable names created below.  */
+
+static int shadow_var_num = 0;
+
 /* Apply type-spec to iterator and create shadow variable if needed.  */
 
 static void
 apply_typespec_to_iterator (gfc_forall_iterator *iter, gfc_typespec *ts,
 			     locus *loc)
 {
-  char *name;
+  const char *name;
   gfc_expr *v;
   gfc_symtree *st;
 
@@ -2846,13 +2851,14 @@ apply_typespec_to_iterator (gfc_forall_iterator *iter, gfc_typespec *ts,
   else
     {
       /* Variable exists in outer scope - must create shadow to comply
-	 with F2018 19.4(6) scoping rules.  */
-      name = (char *) alloca (strlen (v->symtree->name) + 2);
-      strcpy (name, "_");
-      strcat (name, v->symtree->name);
+	 with F2018 19.4(6) scoping rules.  Number the shadow so sibling
+	 constructs do not share it.  */
+      name = gfc_get_string ("_%s_%d", v->symtree->name, shadow_var_num++);
       if (gfc_get_sym_tree (name, NULL, &st, false) != 0)
 	gfc_internal_error ("Failed to create shadow variable symtree for "
 			    "DO CONCURRENT type-spec at %L", loc);
+
+      iter->shadow_outer_sym = iter->var->symtree->n.sym;
 
       v = gfc_get_expr ();
       v->where = gfc_current_locus;
@@ -5341,17 +5347,24 @@ gfc_match_allocate (void)
 	  goto cleanup;
 	}
 
-      if (tail->expr->ts.deferred
-	  || (tail->expr->symtree->n.sym->param_list
-	      && spec_list_type (tail->expr->symtree->n.sym->param_list)
+      bool deferrable = !(tail->expr->ts.type != BT_UNKNOWN
+			   && tail->expr->ts.type != BT_CHARACTER
+			   && !IS_PDT (tail->expr) && !IS_CLASS_PDT (tail->expr)
+			   && (gfc_expr_attr (tail->expr).allocatable
+			       || gfc_expr_attr (tail->expr).pointer));
+
+      if ((tail->expr->ts.deferred
+	   || (tail->expr->symtree->n.sym->param_list
+	       && spec_list_type (tail->expr->symtree->n.sym->param_list)
 				 == SPEC_DEFERRED))
+	  && deferrable)
 	{
 	  saw_deferred = true;
 	  deferred_locus = tail->expr->where;
 	}
       else if ((tail->expr->ts.type == BT_DERIVED
 		|| tail->expr->ts.type == BT_CLASS)
-	       && tail->expr->ref)
+	       && tail->expr->ref && deferrable)
 	{
 	  for (ref = tail->expr->ref; ref; ref = ref->next)
 	    if (ref->type == REF_COMPONENT
@@ -8301,6 +8314,7 @@ gfc_match_class_is (void)
   c = gfc_get_case ();
   c->where = gfc_current_locus;
 
+  type_param_spec_list = NULL;
   m = match_derived_type_spec (&c->ts);
   if (m == MATCH_NO)
     goto syntax;
@@ -8309,6 +8323,9 @@ gfc_match_class_is (void)
 
   if (c->ts.type == BT_DERIVED)
     c->ts.type = BT_CLASS;
+
+  /* Distinguish CLASS IS cases to prevent collisions.  */
+  c->ts.u.derived->hash_value = gfc_hash_value (c->ts.u.derived);
 
   if (gfc_match_char (')') != MATCH_YES)
     goto syntax;

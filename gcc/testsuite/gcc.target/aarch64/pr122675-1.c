@@ -2,7 +2,7 @@
 /* { dg-do compile } */
 /* { dg-options "-O1 -fno-pic -mtune=generic -march=armv8-a" } */
 /* Keep labels and directives ('.cfi_startproc', '.cfi_endproc').  */
-/* { dg-final { check-function-bodies "**" "" "" { target *-*-* } {^\t?\.} } } */
+/* { dg-final { check-function-bodies "**" "" "" { target *-*-* } {^\t?\.|^L[0-9]+:$} } } */
 
 /*
 **test:
@@ -11,7 +11,7 @@
 **...
 **	cbz	w0, .L[0-9]*
 **...
-**	bl	f1
+**	bl	_?f1
 **...
 **	ret
 **.L[0-9]+:

@@ -589,8 +589,8 @@ extern GTY(()) int darwin_ms_struct;
 #define DARWIN_WEAK_CRTS \
 "%{static-libgcc|static:						  \
     %{%:version-compare(>= 10.6 mmacosx-version-min= -lemutls_w):	  \
-      " DARWIN_HEAP_T_LIB "} ;						  \
-   : -lemutls_w	" DARWIN_HEAP_T_LIB "					  \
+      " DARWIN_HEAP_T_LIB DARWIN_SME_RT_LIB "} ;			  \
+   : -lemutls_w	" DARWIN_HEAP_T_LIB DARWIN_SME_RT_LIB "			  \
   }"
 
 /* We specify crt0.o as -lcrt0.o so that ld will search the library path.  */
@@ -1025,9 +1025,8 @@ extern GTY(()) section * darwin_sections[NUM_DARWIN_SECTIONS];
     else if (strlen (PREFIX) == 19 \
 	     && strncmp ("Lcontract_violation", PREFIX, 19) == 0)	\
       sprintf (LABEL, "*%s%ld", "lcontract_violation", (long)(NUM));\
-    else if (strlen (PREFIX) == 13 \
-	     && strncmp ("Lsrc_loc_impl", PREFIX, 13) == 0)	\
-      sprintf (LABEL, "*%s%ld", "lsrc_loc_impl", (long)(NUM));\
+    else if (strlen (PREFIX) == 8  && strncmp ("Lsrc_loc", PREFIX, 8) == 0) \
+      sprintf (LABEL, "*%s%ld", "lsrc_loc", (long)(NUM));\
     else						\
       sprintf (LABEL, "*%s%ld", PREFIX, (long)(NUM));	\
   } while (0)
