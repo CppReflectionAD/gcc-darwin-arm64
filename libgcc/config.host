@@ -397,7 +397,9 @@ aarch64*-*-elf | aarch64*-*-rtems*)
 	;;
 aarch64*-*-darwin*)
 	extra_parts="$extra_parts crtfastmath.o libheapt_w.a"
+	extra_parts="$extra_parts libsme_rt.a"
 	tmake_file="${tmake_file} ${cpu_type}/t-aarch64"
+	tmake_file="${tmake_file} ${cpu_type}/t-darwin-sme"
 	tmake_file="${tmake_file} ${cpu_type}/t-lse"
 	tmake_file="${tmake_file} t-crtfm t-dfprules"
 	tmake_file="${tmake_file} ${cpu_type}/t-softfp t-softfp"

@@ -89,7 +89,6 @@ along with GCC; see the file COPYING3.  If not see
 #include "function-abi.h"
 #include "attribs.h"
 #include "asan.h"
-#include "emit-rtl.h"
 #include "gimple.h"
 #include "cfgloop.h"
 #include "tree-vectorizer.h"
@@ -1753,10 +1752,13 @@ default_addr_space_address_mode (addr_space_t addrspace ATTRIBUTE_UNUSED)
    To match the above, the same modes apply to all address spaces.  */
 
 bool
-default_addr_space_valid_pointer_mode (scalar_int_mode mode,
+default_addr_space_valid_pointer_mode (machine_mode mode,
 				       addr_space_t as ATTRIBUTE_UNUSED)
 {
-  return targetm.valid_pointer_mode (mode);
+  if (! SCALAR_INT_MODE_P (mode))
+    return false;
+
+  return targetm.valid_pointer_mode (as_a <scalar_int_mode> (mode));
 }
 
 /* Some places still assume that all pointer or address modes are the
@@ -1983,6 +1985,15 @@ bool
 default_have_ccmp (void)
 {
   return targetm.gen_ccmp_first != NULL;
+}
+
+/* Default implementation of TARGET_CCMP_FIRST_PREFERENCE.  */
+
+ccmp_first_kind
+default_ccmp_first_preference (machine_mode, tree_code, const_tree,
+			       const_tree)
+{
+  return CCMP_FIRST_UNSUPPORTED;
 }
 
 /* By default we assume that c99 functions are present at the runtime,

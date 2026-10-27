@@ -1,4 +1,5 @@
 /* { dg-do compile } */
+/* { dg-skip-if "SVE is not available on Darwin" { *-*-darwin* } } */
 /* { dg-options "-O3 -mcpu=neoverse-n1+sve -fdump-tree-vect" } */
 /* { dg-final { check-function-bodies "**" "" } } */
 
@@ -11,11 +12,12 @@
 /*
 **f:
 **	...
+**	addvl	x([0-9]+), x([0-9]+), #2
+**	...
 **	ld1w	z[0-9]+.s, p([0-9]+)/z, \[x[0-9]+, z[0-9]+.s, sxtw\]
 **	ld1w	z[0-9]+.s, p([0-9]+)/z, \[x[0-9]+, z[0-9]+.s, sxtw\]
-**	st1w	z[0-9]+.s, p\1, \[x[0-9]+, z[0-9]+.s, sxtw\]
-**	incb	x([0-9]+), all, mul #2
-**	st1w	z[0-9]+.s, p\2, \[x\3, z[0-9]+.s, sxtw\]
+**	st1w	z[0-9]+.s, p\3, \[x\2, z[0-9]+.s, sxtw\]
+**	st1w	z[0-9]+.s, p\4, \[x\1, z[0-9]+.s, sxtw\]
 **	ret
 **	...
 */

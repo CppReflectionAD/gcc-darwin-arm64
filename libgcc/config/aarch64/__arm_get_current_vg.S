@@ -39,7 +39,7 @@ ENTRY (ASMNAME (__arm_get_current_vg))
 	/* Check if SVE is available.  */
 #ifdef __APPLE__
 	adrp	x16, ASMNAME (__aarch64_cpu_features)@PAGE
-	ldr	x16, [x1, ASMNAME (__aarch64_cpu_features)@PAGEOFF]
+	ldr	x16, [x16, ASMNAME (__aarch64_cpu_features)@PAGEOFF]
 #else
 	adrp	x16, __aarch64_cpu_features
 	ldr	x16, [x16, :lo12:__aarch64_cpu_features]

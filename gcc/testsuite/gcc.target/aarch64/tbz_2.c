@@ -57,8 +57,9 @@ void g4(int x)
 
 /* 
 ** g5:
-** 	tst	[wx]0, 255
-** 	bne	.L[0-9]+
+*E 	tst	[wx]0, 255
+*E 	bne	.L[0-9]+
+*M 	cbnz	w0, L[0-9]+
 ** 	ret
 ** 	...
 */

@@ -1,7 +1,6 @@
 /* { dg-do "compile" } */
-/* { dg-options "-O1" } */
+/* { dg-options "-O1 -march=armv8-a" } */
 /* { dg-final { check-function-bodies "**" "" } } */
-/* { dg-skip-if "unimplemented patchable function entry" *-*-darwin* } */
 
 /* Note: this test only checks the instructions in the function bodies,
    not the placement of the patch label or nops before the futncion.  */
