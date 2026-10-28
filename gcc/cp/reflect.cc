@@ -3331,22 +3331,39 @@ eval_parameters_of (location_t loc, const constexpr_ctx *ctx, tree r,
 
    Throws: meta::exception unless
    -- r represents a parameter of a function F and
-   -- there is a point P in the evaluation context for which the innermost
-      non-block scope enclosing P is the function parameter scope associated
-      with F.  */
+   -- F is defined.
+
+   P3096 instead requires a point P in the evaluation context for which the
+   innermost non-block scope enclosing P is the function parameter scope
+   associated with F.  Allowing it anywhere lets code that reflects F's body
+   match a use of a parameter, whose declaration_of is this variable, against
+   parameters_of (^^F), including the unnamed parameters of an expanded pack.
+   Splicing the result outside F is still ill-formed, as for any other local
+   of F.  */
 
 static tree
 eval_variable_of (location_t loc, const constexpr_ctx *ctx, tree r,
 		  reflect_kind kind, bool *non_constant_p, tree *jump_target,
 		  tree fun)
 {
-  if (eval_is_function_parameter (r, kind) == boolean_false_node
-      /* This doesn't consider the points corresponding to injected
-	 declarations, but that doesn't seem needed.  */
-      || DECL_CONTEXT (r) != current_function_decl)
-    return throw_exception (loc, ctx, "reflection does not represent "
-				      "parameter of current function",
+  if (eval_is_function_parameter (r, kind) == boolean_false_node)
+    return throw_exception (loc, ctx, "reflection does not represent a "
+				      "function parameter",
 			    fun, non_constant_p, jump_target);
+  /* Inside F its body is still being parsed, so DECL_SAVED_TREE isn't set
+     yet; elsewhere, instantiate F if needed, as body_of does.  */
+  tree fn = DECL_CONTEXT (r);
+  if (fn != current_function_decl)
+    {
+      if (!DECL_SAVED_TREE (fn)
+	  && (DECL_TEMPLOID_INSTANTIATION (fn) || DECL_TEMPLATE_INFO (fn)))
+	instantiate_decl (fn, /*defer_ok=*/false,
+			  /*expl_inst_class_mem_p=*/false);
+      if (!DECL_SAVED_TREE (fn))
+	return throw_exception (loc, ctx, "reflection represents a parameter "
+					  "of a function that is not defined",
+				fun, non_constant_p, jump_target);
+    }
   r = maybe_update_function_parm (r);
   return get_reflection_raw (loc, r, REFLECT_UNDEF);
 }

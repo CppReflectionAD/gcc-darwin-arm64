@@ -67,6 +67,8 @@ bar (long, const T f, int g[2], T &)
 {
 }
 
+void undefined_fn (int);
+
 void
 foo (int a, const long b, T c, int d[4], T &e)
 {
@@ -80,10 +82,13 @@ foo (int a, const long b, T c, int d[4], T &e)
   static_assert (has_variable_of (parameters_of (^^foo)[2]));
   static_assert (has_variable_of (parameters_of (^^foo)[3]));
   static_assert (has_variable_of (parameters_of (^^foo)[4]));
-  static_assert (!has_variable_of (parameters_of (^^bar)[0]));
-  static_assert (!has_variable_of (parameters_of (^^bar)[1]));
-  static_assert (!has_variable_of (parameters_of (^^bar)[2]));
-  static_assert (!has_variable_of (parameters_of (^^bar)[3]));
+  // Unlike P3096, variable_of also works on another function's parameters,
+  // as long as that function is defined.
+  static_assert (has_variable_of (parameters_of (^^bar)[0]));
+  static_assert (has_variable_of (parameters_of (^^bar)[1]));
+  static_assert (has_variable_of (parameters_of (^^bar)[2]));
+  static_assert (has_variable_of (parameters_of (^^bar)[3]));
+  static_assert (!has_variable_of (parameters_of (^^undefined_fn)[0]));
   static_assert (variable_of (parameters_of (^^foo)[0]) == ^^a);
   static_assert (variable_of (parameters_of (^^foo)[1]) == ^^b);
   static_assert (variable_of (parameters_of (^^foo)[2]) == ^^c);
@@ -113,11 +118,12 @@ baz (int a, info b, info c, info d)
   if (b == parameters_of (^^baz)[1])
     return false;
 
-  // variable can be accessed only in innermost scope
-  try { variable_of (c); return false; }
-  catch (exception) {}
-  try { variable_of (parameters_of (^^baz)[1]); return false; } 
-  catch (exception) {}
+  // Unlike P3096, the variable is also available outside the innermost
+  // scope.
+  if (variable_of (c) != b)
+    return false;
+  if (!is_variable (variable_of (parameters_of (^^baz)[1])))
+    return false;
   return true;
 }
 
@@ -125,12 +131,7 @@ consteval bool
 qux (int a)
 {
   return baz (a + 1, ^^a, parameters_of (^^qux)[0],
-  // TODO: This doesn't work yet, I think we want to check
-  // whether DECL_CONTEXT of the PARM_DECL is current_function_decl
-  // or any of the ctx->call->fundef->decl on the constexpr evaluation
-  // stack.  But currently we only have access to the innermost.
-	      // variable_of (parameters_of (^^qux)[0]));
-	      ^^a);
+	      variable_of (parameters_of (^^qux)[0]));
 }
 
 static_assert (qux (42));
