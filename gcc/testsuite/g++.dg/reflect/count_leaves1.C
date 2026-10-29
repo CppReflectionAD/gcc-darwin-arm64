@@ -24,7 +24,7 @@ constexpr int test_while(int x) {
 
 consteval int count_leaves(info node) {
   auto children = statements_of(node);
-  if (children.size() == 1 && children[0] == node) {
+  if (children.empty()) {
     return 1;
   }
   int sum = 0;
@@ -36,7 +36,7 @@ consteval int count_leaves(info node) {
 
 consteval bool run_test() {
   int if_leaves = count_leaves(body_of( ^^test_if ));
-  if (if_leaves != 4)
+  if (if_leaves != 3)
     return false;
 
   int while_leaves = count_leaves(body_of( ^^test_while ));

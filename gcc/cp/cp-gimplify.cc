@@ -675,6 +675,23 @@ maybe_emit_clobber_object_begin (tree decl, gimple_seq *pre_p)
     }
 }
 
+/* Return true if CALL is a call to an overloaded operator().  */
+
+static bool
+is_call_operator_fn (tree call)
+{
+  tree fn = cp_get_callee (call);
+  if (!fn)
+    return false;
+  if (TREE_CODE (fn) == OBJ_TYPE_REF)
+    fn = resolve_virtual_fun_from_obj_type_ref (fn);
+  else if (TREE_CODE (fn) == ADDR_EXPR)
+    fn = TREE_OPERAND (fn, 0);
+  return (fn && TREE_CODE (fn) == FUNCTION_DECL
+	  && DECL_OVERLOADED_OPERATOR_P (fn)
+	  && DECL_OVERLOADED_OPERATOR_IS (fn, CALL_EXPR));
+}
+
 /* Do C++-specific gimplification.  Args are as for gimplify_expr.  */
 
 int
@@ -935,7 +952,8 @@ cp_gimplify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p)
 	    }
 	}
       else if (flag_strong_eval_order
-	       && !CALL_EXPR_OPERATOR_SYNTAX (*expr_p))
+	       && (!CALL_EXPR_OPERATOR_SYNTAX (*expr_p)
+		   || is_call_operator_fn (*expr_p)))
 	{
 	  /* If flag_strong_eval_order, evaluate the object argument first.  */
 	  tree fntype = TREE_TYPE (CALL_EXPR_FN (*expr_p));
@@ -3901,6 +3919,17 @@ cp_fold (tree x, fold_flags_t flags)
 	optimize = nw;
 	r = fold (x);
 	optimize = sv;
+
+	/* With -freflection, keep a call to a built-in function that would
+	   fold to an expression other than a constant, so that the reflection
+	   of the function body shows the call in the source: std::fabs (x)
+	   would otherwise be an ABS_EXPR.  The middle end folds it later.  */
+	if (flag_reflection
+	    && TREE_CODE (r) != CALL_EXPR
+	    && !CONSTANT_CLASS_P (r)
+	    && callee
+	    && fndecl_built_in_p (callee, BUILT_IN_NORMAL))
+	  r = x;
 
 	if (TREE_CODE (r) != CALL_EXPR)
 	  {
